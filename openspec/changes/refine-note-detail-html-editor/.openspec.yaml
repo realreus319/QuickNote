@@ -1,0 +1,17 @@
+change: refine-note-detail-html-editor
+title: Refine note detail into a full-screen rich HTML editor with finer-grained sync
+status: proposed
+created: 2026-07-02
+owner: codex
+depends_on:
+  - build-quicknote-pwa
+  - add-note-image-attachments
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  tasks: tasks.md
+  specs_dir: specs
+review_mode: local-manual
+notes:
+  - User approved replacing the split textarea-plus-preview detail page with a single rich HTML editor.
+  - Reviewer subagent and OpenSpec CLI are unavailable in this platform, so review is logged locally.

@@ -1,0 +1,16 @@
+change: add-note-image-attachments
+title: Add image attachments to notes with clipboard and sync support
+status: proposed
+created: 2026-07-02
+owner: codex
+depends_on:
+  - build-quicknote-pwa
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  tasks: tasks.md
+  specs_dir: specs
+review_mode: local-manual
+notes:
+  - User requested fully usable image attachments, including preview, copy/paste, and Microsoft sync.
+  - Reviewer subagent and OpenSpec CLI are unavailable in this platform, so artifact review is performed locally and recorded in review-log.md.
