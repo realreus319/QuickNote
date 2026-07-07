@@ -103,7 +103,7 @@ export function buildRemoteNoteBodyHtml(content: string, attachments: LocalNoteA
   const imageMarkup = attachments
     .map(
       (attachment) =>
-        `<figure data-quicknote-image="true" contenteditable="false" draggable="false"><img src="cid:${escapeHtml(attachment.contentId)}" alt="${escapeHtml(attachment.name)}" draggable="false" /></figure>`,
+        `<figure data-quicknote-image="true"><img src="cid:${escapeHtml(attachment.contentId)}" alt="${escapeHtml(attachment.name)}" /></figure>`,
     )
     .join('')
 

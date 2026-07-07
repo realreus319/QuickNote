@@ -32,8 +32,6 @@ describe('noteRichHtml', () => {
 
     expect(hydrated).toContain('data:image/png;base64,AAAA')
     expect(hydrated).toContain('data-attachment-id="attachment-1"')
-    expect(hydrated).toContain('contenteditable="false"')
-    expect(hydrated).toContain('draggable="false"')
   })
 
   it('hydrates stale cid-based local html into displayable data urls', () => {
@@ -63,7 +61,7 @@ describe('noteRichHtml', () => {
 
   it('treats hydrated image editor html as synced with the stored html', () => {
     const storedHtml =
-      '<p>Hello</p><figure data-quicknote-image="true" contenteditable="false" draggable="false"><img src="quicknote-asset://attachment-1" data-attachment-id="attachment-1" alt="shot.png" draggable="false"></figure>'
+      '<p>Hello</p><figure data-quicknote-image="true"><img src="quicknote-asset://attachment-1" data-attachment-id="attachment-1" alt="shot.png"></figure>'
     const hydratedHtml = hydrateLocalNoteHtml(storedHtml, [attachment])
 
     expect(isStoredNoteHtmlInSync(hydratedHtml, storedHtml, [attachment])).toBe(true)

@@ -145,18 +145,18 @@ function normalizeDocumentBody(document: Document) {
   return html || '<p></p>'
 }
 
-function markImageFigureAtomic(image: HTMLImageElement) {
+function normalizeImageFigureMarkup(image: HTMLImageElement) {
   const figure = image.parentElement
 
-  image.setAttribute('draggable', 'false')
+  image.removeAttribute('draggable')
 
   if (!figure || figure.tagName.toLowerCase() !== 'figure') {
     return
   }
 
-  figure.setAttribute('contenteditable', 'false')
-  figure.setAttribute('draggable', 'false')
   figure.dataset.quicknoteImage = 'true'
+  figure.removeAttribute('contenteditable')
+  figure.removeAttribute('draggable')
 }
 
 function readAttachmentIdFromImage(image: HTMLImageElement) {
@@ -229,7 +229,7 @@ export function hydrateLocalNoteHtml(bodyHtml: string, attachments: LocalNoteAtt
 
     image.src = base64ToDataUrl(attachment.base64, attachment.mimeType)
     image.dataset.attachmentId = attachment.id
-    markImageFigureAtomic(image)
+    normalizeImageFigureMarkup(image)
   }
 
   return normalizeDocumentBody(document)
@@ -252,7 +252,7 @@ export function storeEditorNoteHtml(editorHtml: string, attachments: LocalNoteAt
 
     image.src = getNoteAssetUrl(attachmentId)
     image.dataset.attachmentId = attachmentId
-    markImageFigureAtomic(image)
+    normalizeImageFigureMarkup(image)
   }
 
   return normalizeDocumentBody(document)
@@ -263,7 +263,9 @@ export function isStoredNoteHtmlInSync(
   storedHtml: string,
   attachments: LocalNoteAttachment[],
 ) {
-  return storeEditorNoteHtml(editorHtml, attachments) === storedHtml
+  return (
+    storeEditorNoteHtml(editorHtml, attachments) === storeEditorNoteHtml(storedHtml, attachments)
+  )
 }
 
 export function prepareRemoteNoteHtml(bodyHtml: string, attachments: LocalNoteAttachment[]) {
@@ -285,13 +287,12 @@ export function prepareRemoteNoteHtml(bodyHtml: string, attachments: LocalNoteAt
 
     image.src = `cid:${normalizeNoteContentId(attachment.contentId)}`
     removeLocalImageMetadata(image)
-    markImageFigureAtomic(image)
   }
 
   for (const figure of Array.from(document.querySelectorAll('figure[data-quicknote-image]'))) {
-    figure.setAttribute('contenteditable', 'false')
-    figure.setAttribute('draggable', 'false')
     figure.removeAttribute('data-quicknote-image')
+    figure.removeAttribute('contenteditable')
+    figure.removeAttribute('draggable')
   }
 
   return normalizeDocumentBody(document)
@@ -322,12 +323,11 @@ export function convertRemoteNoteHtmlToStoredHtml(
 
     image.src = getNoteAssetUrl(attachment.id)
     image.dataset.attachmentId = attachment.id
-    markImageFigureAtomic(image)
 
     if (image.parentElement?.tagName.toLowerCase() === 'figure') {
       image.parentElement.setAttribute('data-quicknote-image', 'true')
-      image.parentElement.setAttribute('contenteditable', 'false')
-      image.parentElement.setAttribute('draggable', 'false')
+      image.parentElement.removeAttribute('contenteditable')
+      image.parentElement.removeAttribute('draggable')
     }
   }
 
