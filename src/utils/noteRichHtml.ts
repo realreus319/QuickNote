@@ -29,7 +29,117 @@ function createHtmlDocument(html: string) {
   return new DOMParser().parseFromString(html || '<p></p>', 'text/html')
 }
 
+function isBoldStyle(value: string) {
+  const normalized = value.trim().toLowerCase()
+
+  if (!normalized) {
+    return false
+  }
+
+  if (normalized === 'bold' || normalized === 'bolder') {
+    return true
+  }
+
+  const weight = Number.parseInt(normalized, 10)
+  return Number.isFinite(weight) && weight >= 600
+}
+
+function isItalicStyle(value: string) {
+  const normalized = value.trim().toLowerCase()
+
+  return normalized === 'italic' || normalized === 'oblique'
+}
+
+function unwrapElement(element: HTMLElement) {
+  const parent = element.parentNode
+
+  if (!parent) {
+    return
+  }
+
+  while (element.firstChild) {
+    parent.insertBefore(element.firstChild, element)
+  }
+
+  parent.removeChild(element)
+}
+
+function wrapElementChildren(element: HTMLElement, tagNames: string[]) {
+  if (!tagNames.length || !element.firstChild) {
+    return
+  }
+
+  let container = element
+
+  for (const tagName of tagNames) {
+    const wrapper = element.ownerDocument.createElement(tagName)
+
+    while (container.firstChild) {
+      wrapper.appendChild(container.firstChild)
+    }
+
+    container.appendChild(wrapper)
+    container = wrapper
+  }
+}
+
+function hasResidualAttributes(element: HTMLElement) {
+  return Array.from(element.attributes).some((attribute) => {
+    if (attribute.name !== 'style') {
+      return true
+    }
+
+    return attribute.value.trim().length > 0
+  })
+}
+
+function normalizeFormattingElement(element: HTMLElement) {
+  const tagName = element.tagName.toLowerCase()
+
+  if (tagName === 'figure' || tagName === 'img') {
+    return
+  }
+
+  const textDecorationValue = `${element.style.textDecoration} ${element.style.textDecorationLine}`
+    .trim()
+    .toLowerCase()
+  const shouldWrap = {
+    strong:
+      !['strong', 'b'].includes(tagName) && isBoldStyle(element.style.fontWeight),
+    em: !['em', 'i'].includes(tagName) && isItalicStyle(element.style.fontStyle),
+    u: tagName !== 'u' && textDecorationValue.includes('underline'),
+    s: !['s', 'strike', 'del'].includes(tagName) && textDecorationValue.includes('line-through'),
+  }
+
+  wrapElementChildren(
+    element,
+    ['strong', 'em', 'u', 's'].filter((markTag) => shouldWrap[markTag as keyof typeof shouldWrap]),
+  )
+
+  element.style.removeProperty('font-weight')
+  element.style.removeProperty('font-style')
+  element.style.removeProperty('text-decoration')
+  element.style.removeProperty('text-decoration-line')
+
+  if (!element.getAttribute('style')?.trim()) {
+    element.removeAttribute('style')
+  }
+
+  if (tagName === 'span' && !hasResidualAttributes(element)) {
+    unwrapElement(element)
+  }
+}
+
+function normalizeRichTextSemantics(document: Document) {
+  const elements = Array.from(document.body.querySelectorAll<HTMLElement>('*')).reverse()
+
+  for (const element of elements) {
+    normalizeFormattingElement(element)
+  }
+}
+
 function normalizeDocumentBody(document: Document) {
+  normalizeRichTextSemantics(document)
   const html = document.body.innerHTML.trim()
 
   return html || '<p></p>'

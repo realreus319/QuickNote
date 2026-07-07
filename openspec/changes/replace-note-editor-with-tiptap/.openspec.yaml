@@ -1,0 +1,18 @@
+change: replace-note-editor-with-tiptap
+title: Replace the note detail editor with Tiptap while preserving Microsoft Notes HTML sync
+status: proposed
+created: 2026-07-07
+owner: codex
+depends_on:
+  - build-quicknote-pwa
+  - add-note-image-attachments
+  - refine-note-detail-html-editor
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  tasks: tasks.md
+  specs_dir: specs
+review_mode: local-manual
+notes:
+  - User approved Tiptap as the new editor engine with HTML as the only persisted note body source.
+  - Reviewer subagent and OpenSpec CLI are unavailable in this environment, so artifact reviews are logged locally.
