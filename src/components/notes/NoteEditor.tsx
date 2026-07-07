@@ -1,3 +1,4 @@
+import { EditorContent, type Editor as TiptapEditor, useEditor, useEditorState } from '@tiptap/react'
 import {
   Bold,
   ClipboardPaste,
@@ -7,10 +8,12 @@ import {
   ListOrdered,
   Strikethrough,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
 
+import { buildQuickNoteTiptapExtensions } from '@/components/notes/quickNoteTiptap'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import type { LocalNoteAttachment } from '@/types/domain'
 import { formatLongDate } from '@/utils/date'
 import {
@@ -36,14 +39,15 @@ interface NoteEditorProps {
   onAttachmentsChange: (value: LocalNoteAttachment[]) => void
 }
 
-function escapeAttribute(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+const DEFAULT_TOOLBAR_STATE = {
+  bold: false,
+  italic: false,
+  strike: false,
+  bulletList: false,
+  orderedList: false,
 }
 
+const NOTE_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/bmp'
 function sameAttachments(left: LocalNoteAttachment[], right: LocalNoteAttachment[]) {
   if (left.length !== right.length) {
     return false
@@ -60,6 +64,27 @@ function sameAttachments(left: LocalNoteAttachment[], right: LocalNoteAttachment
   })
 }
 
+function buildImageInsertContent(attachments: LocalNoteAttachment[]) {
+  return attachments.flatMap((attachment) => [
+    {
+      type: 'quickNoteImage',
+      attrs: {
+        src: base64ToDataUrl(attachment.base64, attachment.mimeType),
+        alt: attachment.name,
+        attachmentId: attachment.id,
+      },
+    },
+    {
+      type: 'paragraph',
+    },
+  ])
+}
+
+function syncEditorDomState(editor: TiptapEditor) {
+  const dom = editor.view.dom
+  dom.dataset.empty = editor.isEmpty ? 'true' : 'false'
+}
+
 export function NoteEditor({
   title,
   bodyHtml,
@@ -69,12 +94,10 @@ export function NoteEditor({
   onBodyHtmlChange,
   onAttachmentsChange,
 }: NoteEditorProps) {
-  const editorRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<TiptapEditor | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const selectionRef = useRef<Range | null>(null)
-  const saveTimerRef = useRef<number | null>(null)
   const bodyHtmlRef = useRef(bodyHtml)
-  const pendingBodyHtmlRef = useRef(bodyHtml)
+  const attachmentsRef = useRef(attachments)
   const plainText = useMemo(() => derivePlainTextFromStoredHtml(bodyHtml), [bodyHtml])
 
   useEffect(() => {
@@ -82,178 +105,134 @@ export function NoteEditor({
   }, [bodyHtml])
 
   useEffect(() => {
-    const editor = editorRef.current
+    attachmentsRef.current = attachments
+  }, [attachments])
 
-    if (!editor) {
-      return
-    }
+  const syncEditorState = useCallback(
+    (editorHtml: string, nextAttachments = attachmentsRef.current) => {
+      const storedHtml = storeEditorNoteHtml(editorHtml, nextAttachments)
+      const prunedAttachments = pruneAttachmentsForStoredHtml(nextAttachments, storedHtml)
 
-    const hydratedHtml = hydrateLocalNoteHtml(bodyHtml, attachments)
-
-    if (editor.innerHTML !== hydratedHtml) {
-      editor.innerHTML = hydratedHtml
-    }
-
-    pendingBodyHtmlRef.current = bodyHtml
-  }, [attachments, bodyHtml])
-
-  useEffect(() => {
-    function rememberSelection() {
-      const editor = editorRef.current
-      const selection = window.getSelection()
-
-      if (!editor || !selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) {
-        return
+      if (!sameAttachments(prunedAttachments, attachmentsRef.current)) {
+        attachmentsRef.current = prunedAttachments
+        onAttachmentsChange(prunedAttachments)
+      } else {
+        attachmentsRef.current = prunedAttachments
       }
 
-      selectionRef.current = selection.getRangeAt(0).cloneRange()
-    }
-
-    document.addEventListener('selectionchange', rememberSelection)
-
-    return () => {
-      document.removeEventListener('selectionchange', rememberSelection)
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current)
-      }
-    }
-  }, [])
-
-  function syncEditorState(nextAttachments = attachments, immediate = false) {
-    const editor = editorRef.current
-
-    if (!editor) {
-      return
-    }
-
-    const storedHtml = storeEditorNoteHtml(editor.innerHTML, nextAttachments)
-    const prunedAttachments = pruneAttachmentsForStoredHtml(nextAttachments, storedHtml)
-    pendingBodyHtmlRef.current = storedHtml
-
-    if (!sameAttachments(prunedAttachments, attachments)) {
-      onAttachmentsChange(prunedAttachments)
-    }
-
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-    }
-
-    if (immediate) {
       if (storedHtml !== bodyHtmlRef.current) {
         bodyHtmlRef.current = storedHtml
         onBodyHtmlChange(storedHtml)
       }
-      return
-    }
+    },
+    [onAttachmentsChange, onBodyHtmlChange],
+  )
 
-    saveTimerRef.current = window.setTimeout(() => {
-      const nextHtml = pendingBodyHtmlRef.current
-
-      if (nextHtml !== bodyHtmlRef.current) {
-        bodyHtmlRef.current = nextHtml
-        onBodyHtmlChange(nextHtml)
+  const appendFiles = useCallback(
+    async (files: File[], activeEditor: TiptapEditor | null, position?: number) => {
+      if (!files.length) {
+        return
       }
-    }, 180)
-  }
 
-  function focusEditor() {
-    editorRef.current?.focus()
-  }
+      const nextAttachments = [...attachmentsRef.current]
+      const insertedAttachments: LocalNoteAttachment[] = []
 
-  function restoreSelection() {
-    const selection = window.getSelection()
+      for (const file of files) {
+        if (!isSupportedNoteImageType(file.type)) {
+          toast('仅支持 PNG、JPEG、GIF 和 BMP 图片')
+          continue
+        }
 
-    focusEditor()
+        if (file.size > MAX_NOTE_ATTACHMENT_BYTES) {
+          toast('图片超过 35 MB，当前无法添加')
+          continue
+        }
 
-    if (!selectionRef.current || !selection) {
-      return
-    }
+        const attachment = await fileToLocalNoteAttachment(file)
+        nextAttachments.push(attachment)
+        insertedAttachments.push(attachment)
+      }
 
-    selection.removeAllRanges()
-    selection.addRange(selectionRef.current)
-  }
+      if (!insertedAttachments.length || !activeEditor) {
+        return
+      }
 
-  function insertHtmlAtCursor(html: string) {
-    const editor = editorRef.current
+      attachmentsRef.current = nextAttachments
 
+      const content = buildImageInsertContent(insertedAttachments)
+
+      if (position == null) {
+        activeEditor.chain().focus().insertContent(content).run()
+      } else {
+        activeEditor.commands.insertContentAt(position, content, {
+          updateSelection: true,
+        })
+        activeEditor.commands.focus()
+      }
+
+      syncEditorDomState(activeEditor)
+      syncEditorState(activeEditor.getHTML(), nextAttachments)
+    },
+    [syncEditorState],
+  )
+
+  const editorExtensions = useMemo(() => buildQuickNoteTiptapExtensions(), [])
+
+  const editor = useEditor({
+    extensions: editorExtensions,
+    content: hydrateLocalNoteHtml(bodyHtml, attachments),
+    editorProps: {
+      attributes: {
+        class:
+          'note-rich-editor min-h-[60svh] text-[18px] leading-9 text-text-primary outline-none',
+        'data-placeholder': '开始记录今天的内容。',
+        spellcheck: 'true',
+        autocapitalize: 'sentences',
+      },
+    },
+    onCreate: ({ editor: activeEditor }) => {
+      editorRef.current = activeEditor
+      syncEditorDomState(activeEditor)
+    },
+    onUpdate: ({ editor: activeEditor }) => {
+      syncEditorDomState(activeEditor)
+      syncEditorState(activeEditor.getHTML(), attachmentsRef.current)
+    },
+  }, [editorExtensions])
+
+  const toolbarState =
+    useEditorState({
+      editor,
+      selector: ({ editor: activeEditor }) =>
+        activeEditor
+          ? {
+              bold: activeEditor.isActive('bold'),
+              italic: activeEditor.isActive('italic'),
+              strike: activeEditor.isActive('strike'),
+              bulletList: activeEditor.isActive('bulletList'),
+              orderedList: activeEditor.isActive('orderedList'),
+            }
+          : DEFAULT_TOOLBAR_STATE,
+    }) ?? DEFAULT_TOOLBAR_STATE
+
+  useEffect(() => {
     if (!editor) {
       return
     }
 
-    restoreSelection()
-    const selection = window.getSelection()
+    editorRef.current = editor
+    const hydratedHtml = hydrateLocalNoteHtml(bodyHtml, attachments)
 
-    if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) {
-      editor.insertAdjacentHTML('beforeend', html)
-      focusEditor()
-      return
+    if (editor.getHTML() !== hydratedHtml) {
+      editor.commands.setContent(hydratedHtml, {
+        emitUpdate: false,
+      })
+      syncEditorDomState(editor)
     }
-
-    const range = selection.getRangeAt(0)
-    range.deleteContents()
-
-    const container = document.createElement('div')
-    container.innerHTML = html
-    const fragment = document.createDocumentFragment()
-    let lastNode: ChildNode | null = null
-
-    while (container.firstChild) {
-      lastNode = fragment.appendChild(container.firstChild)
-    }
-
-    range.insertNode(fragment)
-
-    if (lastNode) {
-      range.setStartAfter(lastNode)
-      range.collapse(true)
-      selection.removeAllRanges()
-      selection.addRange(range)
-    }
-
-    focusEditor()
-  }
-
-  function execRichCommand(command: string) {
-    restoreSelection()
-    document.execCommand(command)
-    selectionRef.current = window.getSelection()?.rangeCount
-      ? window.getSelection()?.getRangeAt(0).cloneRange() ?? null
-      : null
-    syncEditorState(undefined, false)
-  }
+  }, [attachments, bodyHtml, editor])
 
   function keepEditorSelection(event: React.PointerEvent<HTMLButtonElement>) {
     event.preventDefault()
-  }
-
-  async function appendFiles(files: File[]) {
-    const nextAttachments = [...attachments]
-
-    for (const file of files) {
-      if (!isSupportedNoteImageType(file.type)) {
-        toast('仅支持 PNG、JPEG、GIF 和 BMP 图片')
-        continue
-      }
-
-      if (file.size > MAX_NOTE_ATTACHMENT_BYTES) {
-        toast('图片超过 35 MB，当前无法添加')
-        continue
-      }
-
-      const attachment = await fileToLocalNoteAttachment(file)
-      nextAttachments.push(attachment)
-      const src = base64ToDataUrl(attachment.base64, attachment.mimeType)
-      insertHtmlAtCursor(
-        `<figure data-quicknote-image="true" contenteditable="false" draggable="false"><img src="${escapeAttribute(src)}" data-attachment-id="${escapeAttribute(attachment.id)}" alt="${escapeAttribute(attachment.name)}" draggable="false" /></figure><p><br></p>`,
-      )
-    }
-
-    syncEditorState(nextAttachments, true)
   }
 
   async function handleClipboardRead() {
@@ -283,28 +262,14 @@ export function NoteEditor({
         return
       }
 
-      await appendFiles(files)
+      await appendFiles(files, editorRef.current)
     } catch {
       toast('读取剪贴板图片失败')
     }
   }
 
-  async function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
-    const files = Array.from(event.clipboardData.items)
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => Boolean(file))
-
-    if (!files.length) {
-      return
-    }
-
-    event.preventDefault()
-    await appendFiles(files)
-  }
-
   async function handleCopyFirstImage() {
-    const firstAttachment = attachments[0]
+    const firstAttachment = attachmentsRef.current[0]
 
     if (!firstAttachment) {
       toast('当前没有图片可复制')
@@ -329,131 +294,187 @@ export function NoteEditor({
     }
   }
 
+  function runEditorCommand(command: (activeEditor: TiptapEditor) => boolean) {
+    if (!editor) {
+      return
+    }
+
+    command(editor)
+    syncEditorDomState(editor)
+  }
+
+  async function handlePasteCapture(event: React.ClipboardEvent<HTMLDivElement>) {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+
+    if (!files.length) {
+      return
+    }
+
+    event.preventDefault()
+    await appendFiles(files, editorRef.current)
+  }
+
+  async function handleDropCapture(event: React.DragEvent<HTMLDivElement>) {
+    const files = Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith('image/'))
+
+    if (!files.length) {
+      return
+    }
+
+    event.preventDefault()
+
+    const activeEditor = editorRef.current
+    const position = activeEditor?.view.posAtCoords({
+      left: event.clientX,
+      top: event.clientY,
+    })?.pos
+
+    await appendFiles(files, activeEditor, position)
+  }
+
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => execRichCommand('bold')}
-        >
-          <Bold className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => execRichCommand('italic')}
-        >
-          <Italic className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => execRichCommand('strikeThrough')}
-        >
-          <Strikethrough className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => execRichCommand('insertUnorderedList')}
-        >
-          <List className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => execRichCommand('insertOrderedList')}
-        >
-          <ListOrdered className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <ImagePlus className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full"
-          onPointerDown={keepEditorSelection}
-          onClick={() => void handleClipboardRead()}
-        >
-          <ClipboardPaste className="size-4" />
-        </Button>
-        {attachments.length ? (
+      <div className="sticky top-0 z-20 border-b border-divider/80 bg-white px-0 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant={toolbarState.bold ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            className={cn('rounded-full', toolbarState.bold && 'shadow-none')}
+            disabled={!editor}
+            aria-pressed={toolbarState.bold}
+            onPointerDown={keepEditorSelection}
+            onClick={() => runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleBold().run())}
+          >
+            <Bold className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant={toolbarState.italic ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            className={cn('rounded-full', toolbarState.italic && 'shadow-none')}
+            disabled={!editor}
+            aria-pressed={toolbarState.italic}
+            onPointerDown={keepEditorSelection}
+            onClick={() =>
+              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleItalic().run())
+            }
+          >
+            <Italic className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant={toolbarState.strike ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            className={cn('rounded-full', toolbarState.strike && 'shadow-none')}
+            disabled={!editor}
+            aria-pressed={toolbarState.strike}
+            onPointerDown={keepEditorSelection}
+            onClick={() =>
+              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleStrike().run())
+            }
+          >
+            <Strikethrough className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant={toolbarState.bulletList ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            className={cn('rounded-full', toolbarState.bulletList && 'shadow-none')}
+            disabled={!editor}
+            aria-pressed={toolbarState.bulletList}
+            onPointerDown={keepEditorSelection}
+            onClick={() =>
+              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleBulletList().run())
+            }
+          >
+            <List className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant={toolbarState.orderedList ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            className={cn('rounded-full', toolbarState.orderedList && 'shadow-none')}
+            disabled={!editor}
+            aria-pressed={toolbarState.orderedList}
+            onPointerDown={keepEditorSelection}
+            onClick={() =>
+              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleOrderedList().run())
+            }
+          >
+            <ListOrdered className="size-4" />
+          </Button>
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className="rounded-full text-xs"
+            size="icon-sm"
+            className="rounded-full"
+            disabled={!editor}
             onPointerDown={keepEditorSelection}
-            onClick={() => void handleCopyFirstImage()}
+            onClick={() => fileInputRef.current?.click()}
           >
-            复制图片
+            <ImagePlus className="size-4" />
           </Button>
-        ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-full"
+            disabled={!editor}
+            onPointerDown={keepEditorSelection}
+            onClick={() => void handleClipboardRead()}
+          >
+            <ClipboardPaste className="size-4" />
+          </Button>
+          {attachments.length ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-full text-xs"
+              onPointerDown={keepEditorSelection}
+              onClick={() => void handleCopyFirstImage()}
+            >
+              复制图片
+            </Button>
+          ) : null}
+        </div>
+
+        <input
+          value={title}
+          onChange={(event) => onTitleChange(event.target.value)}
+          placeholder="标题"
+          className="mt-4 w-full border-none bg-transparent px-0 text-[31px] leading-tight font-semibold tracking-[-0.06em] text-text-primary outline-none placeholder:text-[#d4d4d4]"
+        />
+
+        <p className="mt-3 text-[13px] text-text-muted">
+          {formatLongDate(updatedAt)} ｜ {getWordCount(title, plainText)}
+        </p>
       </div>
 
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/bmp"
+        accept={NOTE_IMAGE_ACCEPT}
         className="hidden"
         multiple
         onChange={(event) => {
           const files = Array.from(event.target.files ?? [])
 
           if (files.length) {
-            void appendFiles(files)
+            void appendFiles(files, editorRef.current)
           }
 
           event.target.value = ''
         }}
       />
 
-      <input
-        value={title}
-        onChange={(event) => onTitleChange(event.target.value)}
-        placeholder="标题"
-        className="w-full border-none bg-transparent px-0 text-[31px] leading-tight font-semibold tracking-[-0.06em] text-text-primary outline-none placeholder:text-[#d4d4d4]"
-      />
-
-      <p className="mt-4 text-[13px] text-text-muted">
-        {formatLongDate(updatedAt)} ｜ {getWordCount(title, plainText)}
-      </p>
-
-        <div
-          ref={editorRef}
-          contentEditable
-          suppressContentEditableWarning
-          tabIndex={0}
-          data-placeholder="开始记录今天的内容。"
-          className="note-rich-editor mt-8 min-h-[60svh] text-[18px] leading-9 text-text-primary outline-none"
-          onInput={() => syncEditorState(undefined, false)}
-          onPasteCapture={(event) => void handlePaste(event)}
-        />
+      <div className="pt-8" onPasteCapture={(event) => void handlePasteCapture(event)} onDropCapture={(event) => void handleDropCapture(event)}>
+        <EditorContent editor={editor} />
+      </div>
 
       <p className="mt-8 text-xs text-text-muted">已自动保存到本地，在线时会继续同步。</p>
     </div>

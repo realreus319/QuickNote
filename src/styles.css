@@ -176,14 +176,17 @@ a {
   }
 }
 
-.note-rich-editor[contenteditable='true']:empty::before {
+.note-rich-editor[data-empty='true']::before {
   content: attr(data-placeholder);
+  position: absolute;
   color: #d4d4d4;
+  pointer-events: none;
 }
 
 .note-rich-editor {
   font-synthesis: weight style;
   cursor: text;
+  position: relative;
   user-select: text;
   -webkit-user-select: text;
   -webkit-touch-callout: default;
@@ -203,9 +206,27 @@ a {
   margin: 0 0 0.9rem;
 }
 
+.note-rich-editor li > p {
+  margin-bottom: 0;
+}
+
 .note-rich-editor ul,
 .note-rich-editor ol {
   padding-left: 1.5rem;
+}
+
+.note-rich-editor ul {
+  list-style-type: disc;
+}
+
+.note-rich-editor ol {
+  list-style-type: decimal;
+}
+
+.note-rich-editor blockquote {
+  border-left: 3px solid #ece7da;
+  padding-left: 1rem;
+  color: #5d5d5d;
 }
 
 .note-rich-editor figure {
@@ -218,6 +239,11 @@ a {
   border-radius: 24px;
   background: #f7f6f1;
   -webkit-user-drag: none;
+}
+
+.note-rich-editor .ProseMirror-selectednode img {
+  outline: 2px solid rgba(246, 190, 58, 0.65);
+  outline-offset: 3px;
 }
 
 .note-rich-editor strong,
@@ -233,6 +259,16 @@ a {
 .note-rich-editor s,
 .note-rich-editor strike {
   text-decoration: line-through;
+}
+
+.note-rich-editor u {
+  text-decoration: underline;
+}
+
+.note-rich-editor a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 ::view-transition-group(*) {

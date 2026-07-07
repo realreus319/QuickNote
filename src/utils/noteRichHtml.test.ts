@@ -141,4 +141,26 @@ describe('noteRichHtml', () => {
     expect(storedAgain).toContain('<strong>Bold</strong>')
     expect(storedAgain).toContain('<em>italic</em>')
   })
+
+  it('normalizes styled spans from remote html into semantic rich-text tags', () => {
+    const stored = convertRemoteNoteHtmlToStoredHtml(
+      [
+        '<p>',
+        '<span style="font-weight: 700;">Bold</span>',
+        ' ',
+        '<span style="font-style: italic;">Italic</span>',
+        ' ',
+        '<span style="text-decoration: underline line-through;">Decorated</span>',
+        '</p>',
+      ].join(''),
+      [],
+    )
+
+    expect(stored).toContain('<strong>Bold</strong>')
+    expect(stored).toContain('<em>Italic</em>')
+    expect(stored).toContain('Decorated')
+    expect(stored).not.toContain('font-weight: 700')
+    expect(stored).not.toContain('font-style: italic')
+    expect(stored).not.toContain('text-decoration: underline line-through')
+  })
 })
