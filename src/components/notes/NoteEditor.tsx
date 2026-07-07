@@ -24,6 +24,7 @@ import {
   hydrateLocalNoteHtml,
   isSupportedNoteImageType,
   MAX_NOTE_ATTACHMENT_BYTES,
+  isStoredNoteHtmlInSync,
   pruneAttachmentsForStoredHtml,
   storeEditorNoteHtml,
 } from '@/utils/noteRichHtml'
@@ -221,14 +222,15 @@ export function NoteEditor({
     }
 
     editorRef.current = editor
-    const hydratedHtml = hydrateLocalNoteHtml(bodyHtml, attachments)
-
-    if (editor.getHTML() !== hydratedHtml) {
-      editor.commands.setContent(hydratedHtml, {
-        emitUpdate: false,
-      })
-      syncEditorDomState(editor)
+    if (isStoredNoteHtmlInSync(editor.getHTML(), bodyHtml, attachments)) {
+      return
     }
+
+    const hydratedHtml = hydrateLocalNoteHtml(bodyHtml, attachments)
+    editor.commands.setContent(hydratedHtml, {
+      emitUpdate: false,
+    })
+    syncEditorDomState(editor)
   }, [attachments, bodyHtml, editor])
 
   function keepEditorSelection(event: React.PointerEvent<HTMLButtonElement>) {

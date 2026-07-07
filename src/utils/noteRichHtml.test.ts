@@ -6,6 +6,7 @@ import type { LocalNoteAttachment } from '@/types/domain'
 import {
   convertRemoteNoteHtmlToStoredHtml,
   hydrateLocalNoteHtml,
+  isStoredNoteHtmlInSync,
   mergeRichHtmlBodies,
   prepareRemoteNoteHtml,
   storeEditorNoteHtml,
@@ -58,6 +59,14 @@ describe('noteRichHtml', () => {
 
     expect(stored).toContain('quicknote-asset://attachment-1')
     expect(stored).not.toContain('data:image/png;base64,AAAA')
+  })
+
+  it('treats hydrated image editor html as synced with the stored html', () => {
+    const storedHtml =
+      '<p>Hello</p><figure data-quicknote-image="true" contenteditable="false" draggable="false"><img src="quicknote-asset://attachment-1" data-attachment-id="attachment-1" alt="shot.png" draggable="false"></figure>'
+    const hydratedHtml = hydrateLocalNoteHtml(storedHtml, [attachment])
+
+    expect(isStoredNoteHtmlInSync(hydratedHtml, storedHtml, [attachment])).toBe(true)
   })
 
   it('prepares remote html with cid references', () => {

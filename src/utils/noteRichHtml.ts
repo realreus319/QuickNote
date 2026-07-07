@@ -258,6 +258,14 @@ export function storeEditorNoteHtml(editorHtml: string, attachments: LocalNoteAt
   return normalizeDocumentBody(document)
 }
 
+export function isStoredNoteHtmlInSync(
+  editorHtml: string,
+  storedHtml: string,
+  attachments: LocalNoteAttachment[],
+) {
+  return storeEditorNoteHtml(editorHtml, attachments) === storedHtml
+}
+
 export function prepareRemoteNoteHtml(bodyHtml: string, attachments: LocalNoteAttachment[]) {
   const document = createHtmlDocument(bodyHtml)
   const attachmentById = new Map(attachments.map((attachment) => [attachment.id, attachment]))
