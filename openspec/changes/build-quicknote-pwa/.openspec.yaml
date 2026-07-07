@@ -1,0 +1,15 @@
+change: build-quicknote-pwa
+title: Build QuickNote as a local-first Microsoft notes and todo PWA
+status: proposed
+created: 2026-07-02
+owner: codex
+depends_on: []
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  tasks: tasks.md
+  specs_dir: specs
+review_mode: local-manual
+notes:
+  - User requested OpenSpec and Superpowers discipline.
+  - Reviewer subagent and OpenSpec CLI are unavailable in this platform, so artifact review is performed locally and recorded in review-log.md.

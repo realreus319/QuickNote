@@ -1,0 +1,246 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-app-bg: #f6f6f4;
+  --color-app-bg-alt: #f7f7f5;
+  --color-surface: #ffffff;
+  --color-text-primary: #1f1f1f;
+  --color-text-secondary: #777777;
+  --color-text-muted: #b5b5b5;
+  --color-divider: #eeeeee;
+  --color-field: #ececea;
+  --color-accent: #f6be3a;
+  --color-accent-alt: #f5c242;
+  --color-danger: #cc5f4c;
+  --radius-card: 24px;
+  --radius-pill: 999px;
+  --shadow-soft: 0 12px 30px rgba(17, 17, 17, 0.06);
+  --font-system:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+}
+
+:root {
+  color: var(--color-text-primary);
+  background: var(--color-app-bg);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --background: #ffffff;
+  --foreground: #1f1f1f;
+  --card: #ffffff;
+  --card-foreground: #1f1f1f;
+  --popover: #ffffff;
+  --popover-foreground: #1f1f1f;
+  --primary: #f6be3a;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f0eb;
+  --secondary-foreground: #1f1f1f;
+  --muted: #f4f4f1;
+  --muted-foreground: #777777;
+  --accent: #f9f6e9;
+  --accent-foreground: #1f1f1f;
+  --destructive: #cc5f4c;
+  --border: #eeeeee;
+  --input: #ececea;
+  --ring: rgba(246, 190, 58, 0.45);
+  --chart-1: #f6be3a;
+  --chart-2: #777777;
+  --chart-3: #1f1f1f;
+  --chart-4: #d9d4ca;
+  --chart-5: #b5b5b5;
+  --radius: 1rem;
+  --sidebar: #fbfbf9;
+  --sidebar-foreground: #1f1f1f;
+  --sidebar-primary: #1f1f1f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f4f4f1;
+  --sidebar-accent-foreground: #1f1f1f;
+  --sidebar-border: #eeeeee;
+  --sidebar-ring: rgba(246, 190, 58, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(246, 190, 58, 0.12), transparent 30%),
+    linear-gradient(180deg, var(--color-app-bg-alt) 0%, var(--color-app-bg) 100%);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+textarea {
+  resize: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(246, 190, 58, 0.3);
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-system);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  .bg-memo-card {
+    background-color: rgba(255, 255, 255, 0.92);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .app-shell-width {
+    width: min(100%, 1360px);
+    margin-inline: auto;
+  }
+}
+
+.note-rich-editor[contenteditable='true']:empty::before {
+  content: attr(data-placeholder);
+  color: #d4d4d4;
+}
+
+.note-rich-editor {
+  font-synthesis: weight style;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.note-rich-editor,
+.note-rich-editor * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.note-rich-editor p,
+.note-rich-editor div,
+.note-rich-editor ul,
+.note-rich-editor ol,
+.note-rich-editor blockquote {
+  margin: 0 0 0.9rem;
+}
+
+.note-rich-editor ul,
+.note-rich-editor ol {
+  padding-left: 1.5rem;
+}
+
+.note-rich-editor figure {
+  margin: 1.2rem 0;
+}
+
+.note-rich-editor img {
+  display: block;
+  width: min(100%, 560px);
+  border-radius: 24px;
+  background: #f7f6f1;
+  -webkit-user-drag: none;
+}
+
+.note-rich-editor strong,
+.note-rich-editor b {
+  font-weight: 700;
+}
+
+.note-rich-editor em,
+.note-rich-editor i {
+  font-style: italic;
+}
+
+.note-rich-editor s,
+.note-rich-editor strike {
+  text-decoration: line-through;
+}
+
+::view-transition-group(*) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 260ms;
+}
