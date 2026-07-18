@@ -17,7 +17,6 @@ export interface LocalNote {
   content: string
   bodyHtml: string
   attachments: LocalNoteAttachment[]
-  tags: string[]
   pinned: boolean
   source: NoteSource
   createdAt: string
