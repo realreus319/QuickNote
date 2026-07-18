@@ -37,15 +37,7 @@ export function NoteCard({ note }: { note: LocalNote }) {
             {getExcerpt(note.content || '点击开始记录内容', 150)}
           </p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-text-muted">
-            {note.tags
-              .filter((tag) => tag !== '全部')
-              .slice(0, 2)
-              .map((tag) => (
-                <span key={tag} className="rounded-full bg-surface-muted px-2 py-1 text-text-secondary">
-                  {tag}
-                </span>
-              ))}
+          <div className="mt-4 flex items-center gap-2 text-[11px] text-text-muted">
             {syncStatus && SyncIcon ? (
               <span className={`inline-flex items-center gap-1 ${syncStatus.className}`}>
                 <SyncIcon className="size-3" />
