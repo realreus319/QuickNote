@@ -10,27 +10,24 @@ import { LoadingState } from '@/components/common/LoadingState'
 import { SearchInput } from '@/components/common/SearchInput'
 import { NoteMasonry } from '@/components/notes/NoteMasonry'
 import { Button } from '@/components/ui/button'
-import { NOTE_TAGS, listNotes } from '@/db/notesRepo'
+import { listNotes } from '@/db/notesRepo'
 
 function NotesIndexPage() {
   const { isAuthenticated } = useAuth()
   const notes = useLiveQuery(() => listNotes(), [])
   const [query, setQuery] = useState('')
-  const [tag, setTag] = useState('全部')
 
   const filteredNotes = useMemo(() => {
     if (!notes) return []
 
     const normalizedQuery = query.trim().toLowerCase()
 
-    return notes.filter((note) => {
-      const matchesTag = tag === '全部' || note.tags.includes(tag)
-      const matchesQuery =
-        !normalizedQuery || `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery)
+    if (!normalizedQuery) return notes
 
-      return matchesTag && matchesQuery
-    })
-  }, [notes, query, tag])
+    return notes.filter((note) =>
+      `${note.title} ${note.content}`.toLowerCase().includes(normalizedQuery),
+    )
+  }, [notes, query])
 
   const pinnedNotes = filteredNotes.filter((note) => note.pinned)
   const recentNotes = filteredNotes.filter((note) => !note.pinned)
@@ -49,7 +46,7 @@ function NotesIndexPage() {
     return <LoadingState label="正在加载笔记…" />
   }
 
-  const hasFilters = Boolean(query.trim()) || tag !== '全部'
+  const hasQuery = Boolean(query.trim())
 
   return (
     <section className="space-y-6">
@@ -57,7 +54,13 @@ function NotesIndexPage() {
         title="笔记"
         subtitle={`${notes.length} 条内容，按最近更新排列`}
         actions={
-          <Button asChild variant="ghost" size="icon-lg" className="rounded-[12px] border border-divider bg-white" aria-label="打开设置">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon-lg"
+            className="rounded-[12px] border border-divider bg-white"
+            aria-label="打开设置"
+          >
             <Link to="/settings">
               <Settings2 className="size-[18px]" />
             </Link>
@@ -66,28 +69,6 @@ function NotesIndexPage() {
       />
 
       <SearchInput placeholder="搜索标题与正文" value={query} onChange={setQuery} />
-
-      <div className="flex gap-1.5 overflow-x-auto pb-1" aria-label="笔记标签筛选">
-        {NOTE_TAGS.map((item) => {
-          const active = item === tag
-
-          return (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setTag(item)}
-              className={`rounded-full border px-3.5 py-2 text-[13px] font-medium whitespace-nowrap transition-colors ${
-                active
-                  ? 'border-text-primary bg-text-primary text-white'
-                  : 'border-divider bg-white text-text-secondary hover:border-[#d4d4ce] hover:text-text-primary'
-              }`}
-              aria-pressed={active}
-            >
-              {item}
-            </button>
-          )
-        })}
-      </div>
 
       {filteredNotes.length ? (
         <div className="space-y-8">
@@ -113,12 +94,8 @@ function NotesIndexPage() {
         </div>
       ) : (
         <EmptyState
-          title={hasFilters ? '没有匹配的笔记' : '从第一条笔记开始'}
-          description={
-            hasFilters
-              ? '换个关键词或标签试试。'
-              : '点击右下角“新建”，快速记录一条内容。'
-          }
+          title={hasQuery ? '没有匹配的笔记' : '从第一条笔记开始'}
+          description={hasQuery ? '换个关键词试试。' : '点击右下角“新建”，快速记录一条内容。'}
         />
       )}
     </section>
