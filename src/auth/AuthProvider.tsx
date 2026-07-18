@@ -1,4 +1,4 @@
-import type { AccountInfo } from '@azure/msal-browser'
+import { InteractionRequiredAuthError, type AccountInfo } from '@azure/msal-browser'
 import {
   createContext,
   useCallback,
@@ -10,6 +10,13 @@ import {
 } from 'react'
 
 import { graphScopes, msalInstance } from '@/auth/msal'
+import {
+  clearMsalCacheRecoveryAttempt,
+  getMsalAuthErrorMessage,
+  hasMsalCacheRecoveryAttempted,
+  isMsalPostRequestFailed,
+  markMsalCacheRecoveryAttempted,
+} from '@/auth/msalRecovery'
 
 interface AuthContextValue {
   account: AccountInfo | null
@@ -22,6 +29,33 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
+
+const loginRequest = {
+  scopes: graphScopes,
+  prompt: 'select_account' as const,
+}
+
+async function startInteractiveRecovery(clearCache: boolean) {
+  const storage = window.sessionStorage
+
+  if (hasMsalCacheRecoveryAttempted(storage)) {
+    return false
+  }
+
+  markMsalCacheRecoveryAttempted(storage)
+
+  try {
+    if (clearCache) {
+      await msalInstance.clearCache()
+    }
+
+    await msalInstance.loginRedirect(loginRequest)
+    return true
+  } catch (error) {
+    clearMsalCacheRecoveryAttempt(storage)
+    throw error
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<AccountInfo | null>(null)
@@ -43,14 +77,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (nextAccount) {
           msalInstance.setActiveAccount(nextAccount)
+          clearMsalCacheRecoveryAttempt(window.sessionStorage)
         }
 
         if (!cancelled) {
           setAccount(nextAccount)
+          setError(null)
         }
       } catch (caughtError) {
+        let effectiveError = caughtError
+
+        if (isMsalPostRequestFailed(caughtError) && navigator.onLine) {
+          try {
+            const redirectStarted = await startInteractiveRecovery(true)
+
+            if (redirectStarted) {
+              return
+            }
+          } catch (recoveryError) {
+            effectiveError = recoveryError
+          }
+        }
+
         if (!cancelled) {
-          setError(caughtError instanceof Error ? caughtError.message : '登录状态恢复失败')
+          setError(getMsalAuthErrorMessage(effectiveError))
         }
       } finally {
         if (!cancelled) {
@@ -68,14 +118,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async () => {
     setError(null)
-    await msalInstance.loginRedirect({
-      scopes: graphScopes,
-      prompt: 'select_account',
-    })
+    clearMsalCacheRecoveryAttempt(window.sessionStorage)
+
+    try {
+      await msalInstance.clearCache()
+      await msalInstance.loginRedirect(loginRequest)
+    } catch (caughtError) {
+      setError(getMsalAuthErrorMessage(caughtError))
+    }
   }, [])
 
   const logout = useCallback(async () => {
-    await msalInstance.logoutRedirect()
+    setError(null)
+    clearMsalCacheRecoveryAttempt(window.sessionStorage)
+
+    try {
+      await msalInstance.logoutRedirect()
+    } catch (caughtError) {
+      setError(getMsalAuthErrorMessage(caughtError))
+    }
   }, [])
 
   const getAccessToken = useCallback(async (scopes = graphScopes) => {
@@ -88,12 +149,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     msalInstance.setActiveAccount(active)
 
-    const result = await msalInstance.acquireTokenSilent({
-      account: active,
-      scopes,
-    })
+    try {
+      const result = await msalInstance.acquireTokenSilent({
+        account: active,
+        scopes,
+      })
 
-    return result.accessToken
+      return result.accessToken
+    } catch (caughtError) {
+      const cacheFailure = isMsalPostRequestFailed(caughtError)
+      const interactionRequired = caughtError instanceof InteractionRequiredAuthError
+
+      if ((cacheFailure || interactionRequired) && navigator.onLine) {
+        try {
+          const redirectStarted = await startInteractiveRecovery(cacheFailure)
+
+          if (redirectStarted) {
+            setError(null)
+            throw new Error('正在重新连接 Microsoft 账户')
+          }
+        } catch (recoveryError) {
+          const message = getMsalAuthErrorMessage(recoveryError)
+          setError(message)
+          throw recoveryError
+        }
+      }
+
+      const message = getMsalAuthErrorMessage(caughtError)
+      setError(message)
+      throw new Error(message, { cause: caughtError })
+    }
   }, [account])
 
   const value = useMemo<AuthContextValue>(
