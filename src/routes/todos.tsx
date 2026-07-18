@@ -1,6 +1,6 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Filter, Settings2 } from 'lucide-react'
+import { Settings2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { TopBar } from '@/components/app/TopBar'
@@ -20,6 +20,12 @@ import {
 import { isToday } from '@/utils/date'
 
 type TodoFilter = 'today' | 'all' | 'completed'
+
+const filters = [
+  { id: 'today', label: '今天' },
+  { id: 'all', label: '全部' },
+  { id: 'completed', label: '已完成' },
+] as const
 
 function TodosPage() {
   const lists = useLiveQuery(() => listTodoLists(), [])
@@ -43,56 +49,60 @@ function TodosPage() {
       }
 
       if (filter === 'today') {
-        return isToday(todo.dueDateTime) || !todo.dueDateTime
+        return todo.status !== 'completed' && (isToday(todo.dueDateTime) || !todo.dueDateTime)
       }
 
       return true
     })
   }, [filter, resolvedListId, todos])
 
+  const incompleteCount = useMemo(
+    () =>
+      (todos ?? []).filter(
+        (todo) => (!resolvedListId || todo.listId === resolvedListId) && todo.status !== 'completed',
+      ).length,
+    [resolvedListId, todos],
+  )
+
   if (!lists || !todos) {
     return <LoadingState label="正在加载待办…" />
   }
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-6">
       <TopBar
         title="待办"
-        subtitle="保持清单轻一点，今天的事就更容易开始。"
+        subtitle={incompleteCount ? `${incompleteCount} 项尚未完成` : '当前清单已经完成'}
         actions={
-          <>
-            <Button variant="ghost" size="icon-lg" className="rounded-full bg-white">
-              <Filter className="size-4.5" />
-            </Button>
-            <Button variant="ghost" size="icon-lg" className="rounded-full bg-white">
-              <Settings2 className="size-4.5" />
-            </Button>
-          </>
+          <Button asChild variant="ghost" size="icon-lg" className="rounded-[12px] border border-divider bg-white" aria-label="打开设置">
+            <Link to="/settings">
+              <Settings2 className="size-[18px]" />
+            </Link>
+          </Button>
         }
       />
 
-      <TodoListPicker
-        lists={activeLists}
-        selectedListId={resolvedListId}
-        onSelect={setSelectedListId}
-      />
+      {activeLists.length ? (
+        <TodoListPicker
+          lists={activeLists}
+          selectedListId={resolvedListId}
+          onSelect={setSelectedListId}
+        />
+      ) : null}
 
-      <div className="flex gap-2">
-        {[
-          { id: 'today', label: '今天' },
-          { id: 'all', label: '全部' },
-          { id: 'completed', label: '已完成' },
-        ].map((item) => {
+      <div className="inline-flex rounded-[12px] border border-divider bg-white p-1" aria-label="待办筛选">
+        {filters.map((item) => {
           const active = item.id === filter
 
           return (
             <button
               key={item.id}
               type="button"
-              onClick={() => setFilter(item.id as TodoFilter)}
-              className={`rounded-[999px] px-4 py-2 text-sm ${
-                active ? 'bg-text-primary text-white' : 'bg-[#ececea] text-text-secondary'
+              onClick={() => setFilter(item.id)}
+              className={`rounded-[9px] px-3.5 py-2 text-[13px] font-medium transition-colors ${
+                active ? 'bg-text-primary text-white' : 'text-text-secondary hover:bg-surface-muted'
               }`}
+              aria-pressed={active}
             >
               {item.label}
             </button>
@@ -107,7 +117,7 @@ function TodosPage() {
       />
 
       {visibleTodos.length ? (
-        <div className="space-y-3">
+        <div className="overflow-hidden rounded-[16px] border border-divider bg-white divide-y divide-divider">
           {visibleTodos.map((todo) => (
             <TodoItem
               key={todo.id}
@@ -123,8 +133,8 @@ function TodosPage() {
         </div>
       ) : (
         <EmptyState
-          title="清单很轻"
-          description="先添加一条任务，或者换个筛选条件看看。"
+          title={filter === 'completed' ? '还没有已完成项目' : '清单很轻'}
+          description={filter === 'completed' ? '完成的事项会出现在这里。' : '添加一条任务，或者切换筛选条件。'}
         />
       )}
     </section>

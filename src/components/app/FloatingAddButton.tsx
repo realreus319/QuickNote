@@ -11,36 +11,26 @@ export function FloatingAddButton() {
   })
 
   async function handleClick() {
-    if (pathname === '/notes') {
-      const note = await createNote()
-      await navigate({
-        to: '/notes/$noteId',
-        params: {
-          noteId: note.id,
-        },
-      })
-      return
-    }
-
-    if (pathname === '/todos') {
-      window.dispatchEvent(new CustomEvent('quicknote:add-todo'))
-    }
+    const note = await createNote()
+    await navigate({
+      to: '/notes/$noteId',
+      params: { noteId: note.id },
+    })
   }
 
-  if (pathname !== '/notes' && pathname !== '/todos') {
+  if (pathname !== '/notes') {
     return null
   }
 
   return (
-    <div className="pointer-events-none fixed right-5 bottom-24 z-30 md:right-8 md:bottom-8">
+    <div className="pointer-events-none fixed right-5 bottom-[calc(5.8rem+env(safe-area-inset-bottom))] z-30 lg:hidden">
       <Button
-        size="icon-lg"
-        className="pointer-events-auto size-14 rounded-full bg-accent text-white shadow-[0_18px_30px_rgba(246,190,58,0.35)] hover:bg-[#f0b52c]"
-        onClick={() => {
-          void handleClick()
-        }}
+        className="pointer-events-auto h-12 rounded-full bg-text-primary px-4 text-sm font-semibold text-white shadow-floating hover:bg-[#2a2a28]"
+        onClick={() => void handleClick()}
+        aria-label="新建笔记"
       >
-        <Plus className="size-6" />
+        <Plus className="size-4" />
+        新建
       </Button>
     </div>
   )

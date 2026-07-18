@@ -6,6 +6,7 @@ import {
   Italic,
   List,
   ListOrdered,
+  MoreHorizontal,
   Strikethrough,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -13,6 +14,13 @@ import { toast } from 'sonner'
 
 import { buildQuickNoteTiptapExtensions } from '@/components/notes/quickNoteTiptap'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import type { LocalNoteAttachment } from '@/types/domain'
 import { formatLongDate } from '@/utils/date'
@@ -49,6 +57,7 @@ const DEFAULT_TOOLBAR_STATE = {
 }
 
 const NOTE_IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/bmp'
+
 function sameAttachments(left: LocalNoteAttachment[], right: LocalNoteAttachment[]) {
   if (left.length !== right.length) {
     return false
@@ -179,27 +188,30 @@ export function NoteEditor({
 
   const editorExtensions = useMemo(() => buildQuickNoteTiptapExtensions(), [])
 
-  const editor = useEditor({
-    extensions: editorExtensions,
-    content: hydrateLocalNoteHtml(bodyHtml, attachments),
-    editorProps: {
-      attributes: {
-        class:
-          'note-rich-editor min-h-[60svh] text-[18px] leading-9 text-text-primary outline-none',
-        'data-placeholder': '开始记录今天的内容。',
-        spellcheck: 'true',
-        autocapitalize: 'sentences',
+  const editor = useEditor(
+    {
+      extensions: editorExtensions,
+      content: hydrateLocalNoteHtml(bodyHtml, attachments),
+      editorProps: {
+        attributes: {
+          class:
+            'note-rich-editor min-h-[65svh] text-[17px] leading-8 text-text-primary outline-none md:text-[18px] md:leading-9',
+          'data-placeholder': '开始记录内容…',
+          spellcheck: 'true',
+          autocapitalize: 'sentences',
+        },
+      },
+      onCreate: ({ editor: activeEditor }) => {
+        editorRef.current = activeEditor
+        syncEditorDomState(activeEditor)
+      },
+      onUpdate: ({ editor: activeEditor }) => {
+        syncEditorDomState(activeEditor)
+        syncEditorState(activeEditor.getHTML(), attachmentsRef.current)
       },
     },
-    onCreate: ({ editor: activeEditor }) => {
-      editorRef.current = activeEditor
-      syncEditorDomState(activeEditor)
-    },
-    onUpdate: ({ editor: activeEditor }) => {
-      syncEditorDomState(activeEditor)
-      syncEditorState(activeEditor.getHTML(), attachmentsRef.current)
-    },
-  }, [editorExtensions])
+    [editorExtensions],
+  )
 
   const toolbarState =
     useEditorState({
@@ -338,122 +350,16 @@ export function NoteEditor({
   }
 
   return (
-    <div>
-      <div className="sticky top-0 z-20 border-b border-divider/80 bg-white px-0 py-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant={toolbarState.bold ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            className={cn('rounded-full', toolbarState.bold && 'shadow-none')}
-            disabled={!editor}
-            aria-pressed={toolbarState.bold}
-            onPointerDown={keepEditorSelection}
-            onClick={() => runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleBold().run())}
-          >
-            <Bold className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant={toolbarState.italic ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            className={cn('rounded-full', toolbarState.italic && 'shadow-none')}
-            disabled={!editor}
-            aria-pressed={toolbarState.italic}
-            onPointerDown={keepEditorSelection}
-            onClick={() =>
-              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleItalic().run())
-            }
-          >
-            <Italic className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant={toolbarState.strike ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            className={cn('rounded-full', toolbarState.strike && 'shadow-none')}
-            disabled={!editor}
-            aria-pressed={toolbarState.strike}
-            onPointerDown={keepEditorSelection}
-            onClick={() =>
-              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleStrike().run())
-            }
-          >
-            <Strikethrough className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant={toolbarState.bulletList ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            className={cn('rounded-full', toolbarState.bulletList && 'shadow-none')}
-            disabled={!editor}
-            aria-pressed={toolbarState.bulletList}
-            onPointerDown={keepEditorSelection}
-            onClick={() =>
-              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleBulletList().run())
-            }
-          >
-            <List className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant={toolbarState.orderedList ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            className={cn('rounded-full', toolbarState.orderedList && 'shadow-none')}
-            disabled={!editor}
-            aria-pressed={toolbarState.orderedList}
-            onPointerDown={keepEditorSelection}
-            onClick={() =>
-              runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleOrderedList().run())
-            }
-          >
-            <ListOrdered className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="rounded-full"
-            disabled={!editor}
-            onPointerDown={keepEditorSelection}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <ImagePlus className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="rounded-full"
-            disabled={!editor}
-            onPointerDown={keepEditorSelection}
-            onClick={() => void handleClipboardRead()}
-          >
-            <ClipboardPaste className="size-4" />
-          </Button>
-          {attachments.length ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="rounded-full text-xs"
-              onPointerDown={keepEditorSelection}
-              onClick={() => void handleCopyFirstImage()}
-            >
-              复制图片
-            </Button>
-          ) : null}
-        </div>
-
+    <div className="safe-bottom-editor md:pb-0">
+      <div className="pt-8 md:pt-10">
         <input
           value={title}
           onChange={(event) => onTitleChange(event.target.value)}
           placeholder="标题"
-          className="mt-4 w-full border-none bg-transparent px-0 text-[31px] leading-tight font-semibold tracking-[-0.06em] text-text-primary outline-none placeholder:text-[#d4d4d4]"
+          className="w-full border-none bg-transparent px-0 text-[34px] leading-[1.12] font-semibold tracking-[-0.035em] text-text-primary outline-none placeholder:text-[#c8c8c2] md:text-[42px]"
         />
-
-        <p className="mt-3 text-[13px] text-text-muted">
-          {formatLongDate(updatedAt)} ｜ {getWordCount(title, plainText)}
+        <p className="mt-3 text-xs text-text-muted">
+          {formatLongDate(updatedAt)} · {getWordCount(title, plainText)}
         </p>
       </div>
 
@@ -474,11 +380,131 @@ export function NoteEditor({
         }}
       />
 
-      <div className="pt-8" onPasteCapture={(event) => void handlePasteCapture(event)} onDropCapture={(event) => void handleDropCapture(event)}>
+      <div
+        className="fixed right-4 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-4 z-40 flex items-center gap-1 overflow-x-auto rounded-[18px] border border-divider bg-white/94 p-1.5 shadow-floating backdrop-blur-xl md:sticky md:top-4 md:right-auto md:bottom-auto md:left-auto md:z-20 md:mt-6 md:w-fit md:max-w-full md:shadow-[0_8px_24px_rgba(25,25,24,0.07)]"
+        role="toolbar"
+        aria-label="文本格式"
+      >
+        <Button
+          type="button"
+          variant={toolbarState.bold ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          className={cn('shrink-0 rounded-[10px]', toolbarState.bold && 'bg-surface-muted shadow-none')}
+          disabled={!editor}
+          aria-label="加粗"
+          aria-pressed={toolbarState.bold}
+          onPointerDown={keepEditorSelection}
+          onClick={() => runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleBold().run())}
+        >
+          <Bold className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant={toolbarState.italic ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          className={cn('shrink-0 rounded-[10px]', toolbarState.italic && 'bg-surface-muted shadow-none')}
+          disabled={!editor}
+          aria-label="斜体"
+          aria-pressed={toolbarState.italic}
+          onPointerDown={keepEditorSelection}
+          onClick={() => runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleItalic().run())}
+        >
+          <Italic className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant={toolbarState.bulletList ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          className={cn('shrink-0 rounded-[10px]', toolbarState.bulletList && 'bg-surface-muted shadow-none')}
+          disabled={!editor}
+          aria-label="无序列表"
+          aria-pressed={toolbarState.bulletList}
+          onPointerDown={keepEditorSelection}
+          onClick={() =>
+            runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleBulletList().run())
+          }
+        >
+          <List className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant={toolbarState.orderedList ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          className={cn('shrink-0 rounded-[10px]', toolbarState.orderedList && 'bg-surface-muted shadow-none')}
+          disabled={!editor}
+          aria-label="有序列表"
+          aria-pressed={toolbarState.orderedList}
+          onPointerDown={keepEditorSelection}
+          onClick={() =>
+            runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleOrderedList().run())
+          }
+        >
+          <ListOrdered className="size-4" />
+        </Button>
+
+        <span className="mx-1 h-5 w-px shrink-0 bg-divider" aria-hidden="true" />
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0 rounded-[10px]"
+          disabled={!editor}
+          aria-label="添加图片"
+          onPointerDown={keepEditorSelection}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <ImagePlus className="size-4" />
+        </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 rounded-[10px]"
+              disabled={!editor}
+              aria-label="更多编辑操作"
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={8} className="min-w-44">
+            <DropdownMenuItem
+              onSelect={() =>
+                runEditorCommand((activeEditor) => activeEditor.chain().focus().toggleStrike().run())
+              }
+            >
+              <Strikethrough className="size-4" />
+              {toolbarState.strike ? '取消删除线' : '删除线'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void handleClipboardRead()}>
+              <ClipboardPaste className="size-4" />
+              粘贴剪贴板图片
+            </DropdownMenuItem>
+            {attachments.length ? (
+              <DropdownMenuItem onSelect={() => void handleCopyFirstImage()}>
+                <ImagePlus className="size-4" />
+                复制首张图片
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div
+        className="pt-8 md:pt-10"
+        onPasteCapture={(event) => void handlePasteCapture(event)}
+        onDropCapture={(event) => void handleDropCapture(event)}
+      >
         <EditorContent editor={editor} />
       </div>
 
-      <p className="mt-8 text-xs text-text-muted">已自动保存到本地，在线时会继续同步。</p>
+      <p className="mt-10 border-t border-divider pt-4 text-xs text-text-muted">
+        自动保存到本地，联网后继续同步。
+      </p>
     </div>
   )
 }

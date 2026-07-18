@@ -1,3 +1,4 @@
+import { CornerDownLeft, Plus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ interface TodoQuickAddProps {
 export function TodoQuickAdd({ onSubmit }: TodoQuickAddProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [value, setValue] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     function handleFocus() {
@@ -26,20 +28,31 @@ export function TodoQuickAdd({ onSubmit }: TodoQuickAddProps) {
   async function handleCreate() {
     const next = value.trim()
 
-    if (!next) return
+    if (!next || submitting) return
 
-    await onSubmit(next)
-    setValue('')
+    setSubmitting(true)
+
+    try {
+      await onSubmit(next)
+      setValue('')
+      inputRef.current?.focus()
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
-    <div className="bg-memo-card flex items-center gap-3 rounded-[24px] p-3">
+    <div className="flex items-center gap-2 rounded-[14px] border border-divider bg-white p-2">
+      <span className="ml-2 flex size-7 items-center justify-center rounded-full bg-[#fff7dc] text-[#8f6b0c]" aria-hidden="true">
+        <Plus className="size-4" />
+      </span>
       <Input
         ref={inputRef}
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        className="h-11 border-none bg-field"
-        placeholder="添加今天要完成的事"
+        className="h-10 min-w-0 flex-1 border-none bg-transparent px-1 shadow-none focus-visible:ring-0"
+        placeholder="添加一项待办"
+        aria-label="待办标题"
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault()
@@ -47,8 +60,15 @@ export function TodoQuickAdd({ onSubmit }: TodoQuickAddProps) {
           }
         }}
       />
-      <Button className="h-11 rounded-[18px] bg-accent px-4 text-white" onClick={() => void handleCreate()}>
-        添加
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-10 rounded-[11px] bg-surface-muted text-text-primary hover:bg-[#e9e9e4]"
+        disabled={!value.trim() || submitting}
+        onClick={() => void handleCreate()}
+        aria-label="添加待办"
+      >
+        <CornerDownLeft className="size-4" />
       </Button>
     </div>
   )

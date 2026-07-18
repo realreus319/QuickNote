@@ -12,15 +12,15 @@ interface TopBarProps {
 export function TopBar({ title, subtitle, actions, className }: TopBarProps) {
   return (
     <header className={cn('flex items-start justify-between gap-4', className)}>
-      <div>
-        <h1 className="text-[28px] leading-none font-semibold tracking-[-0.04em] text-text-primary">
+      <div className="min-w-0">
+        <h1 className="text-[30px] leading-[1.08] font-semibold tracking-[-0.025em] text-text-primary sm:text-[34px]">
           {title}
         </h1>
         {subtitle ? (
-          <p className="mt-2 text-sm text-text-secondary">{subtitle}</p>
+          <p className="mt-2 text-[13px] leading-5 text-text-secondary sm:text-sm">{subtitle}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </header>
   )
 }
