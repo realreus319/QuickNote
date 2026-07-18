@@ -161,17 +161,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const interactionRequired = caughtError instanceof InteractionRequiredAuthError
 
       if ((cacheFailure || interactionRequired) && navigator.onLine) {
-        try {
-          const redirectStarted = await startInteractiveRecovery(cacheFailure)
+        let redirectStarted = false
 
-          if (redirectStarted) {
-            setError(null)
-            throw new Error('正在重新连接 Microsoft 账户')
-          }
+        try {
+          redirectStarted = await startInteractiveRecovery(cacheFailure)
         } catch (recoveryError) {
           const message = getMsalAuthErrorMessage(recoveryError)
           setError(message)
           throw recoveryError
+        }
+
+        if (redirectStarted) {
+          setError(null)
+          throw new Error('正在重新连接 Microsoft 账户')
         }
       }
 
