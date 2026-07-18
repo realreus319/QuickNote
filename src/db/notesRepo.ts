@@ -10,8 +10,6 @@ import {
 } from '@/utils/noteRichHtml'
 import { readString, splitRemoteNoteContent } from '@/utils/text'
 
-export const NOTE_TAGS = ['全部', '通话笔记', '未分类', '工作', '个人']
-
 function sortNotes(notes: LocalNote[]) {
   return notes.sort((left, right) => {
     if (left.pinned !== right.pinned) {
@@ -26,16 +24,6 @@ export async function listNotes() {
   return sortNotes((await db.notes.toArray()).filter((note) => !note.deleted))
 }
 
-export async function removeLegacyDemoNotes() {
-  const demoIds = (await db.notes.toArray())
-    .filter((note) => note.id.startsWith('demo-note-'))
-    .map((note) => note.id)
-
-  if (demoIds.length) {
-    await db.notes.bulkDelete(demoIds)
-  }
-}
-
 export async function getNoteById(noteId: string) {
   return db.notes.get(noteId)
 }
@@ -48,7 +36,6 @@ export async function createNote() {
     content: '',
     bodyHtml: '<p></p>',
     attachments: [],
-    tags: ['未分类'],
     pinned: false,
     source: 'local',
     createdAt: now,
@@ -64,7 +51,7 @@ export async function createNote() {
 
 export async function updateNote(
   noteId: string,
-  patch: Partial<Pick<LocalNote, 'title' | 'bodyHtml' | 'tags' | 'pinned' | 'attachments'>>,
+  patch: Partial<Pick<LocalNote, 'title' | 'bodyHtml' | 'pinned' | 'attachments'>>,
 ) {
   const current = await db.notes.get(noteId)
 
@@ -121,7 +108,7 @@ export async function searchNotes(query: string) {
   if (!normalized) return []
 
   return (await listNotes()).filter((note) => {
-    const haystack = `${note.title} ${note.content} ${note.tags.join(' ')}`.toLowerCase()
+    const haystack = `${note.title} ${note.content}`.toLowerCase()
 
     return haystack.includes(normalized)
   })
@@ -175,7 +162,6 @@ export async function syncRemoteNotes(notes: Array<Record<string, unknown>>) {
       attachments: shouldPreserveExistingAttachments
         ? existing?.attachments ?? []
         : remoteAttachments,
-      tags: existing?.tags?.length ? existing.tags : ['未分类'],
       pinned: existing?.pinned ?? false,
       source: 'microsoft-notes',
       createdAt: readString(item.createdDateTime, existing?.createdAt ?? now),

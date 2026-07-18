@@ -21,20 +21,6 @@ export async function ensureDefaultTodoList() {
   return defaultTodoList
 }
 
-export async function removeLegacyDemoTodos() {
-  const demoTodoIds = (await db.todos.toArray())
-    .filter((todo) => todo.id.startsWith('demo-todo-') || todo.listId === 'demo-list')
-    .map((todo) => todo.id)
-
-  if (demoTodoIds.length) {
-    await db.todos.bulkDelete(demoTodoIds)
-  }
-
-  if (await db.todoLists.get('demo-list')) {
-    await db.todoLists.delete('demo-list')
-  }
-}
-
 export async function listTodoLists() {
   return db.todoLists.toArray()
 }
