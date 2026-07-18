@@ -21,43 +21,43 @@ export function NoteCard({ note }: { note: LocalNote }) {
       to="/notes/$noteId"
       params={{ noteId: note.id }}
       viewTransition
-      className="group block rounded-[15px] border border-divider bg-white p-4 transition-[border-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-[#d8d8d2] hover:shadow-[0_10px_28px_rgba(25,25,24,0.055)]"
+      className="group block min-w-0 max-w-full overflow-hidden rounded-[15px] border border-divider bg-white p-3 transition-[border-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-[#d8d8d2] hover:shadow-[0_10px_28px_rgba(25,25,24,0.055)] sm:p-4"
       style={{ viewTransitionName: `note-card-${note.id}` }}
     >
-      <article className={previewImage ? 'grid grid-cols-[minmax(0,1fr)_76px] gap-4' : ''}>
-        <div className="min-w-0">
-          <div className="flex items-start gap-2">
-            <h3 className="line-clamp-2 min-w-0 flex-1 text-[16px] leading-6 font-semibold tracking-[-0.01em] text-text-primary">
-              {note.title || '未命名便签'}
-            </h3>
-            {note.pinned ? <Pin className="mt-1 size-3.5 shrink-0 text-accent" aria-label="已固定" /> : null}
-          </div>
-
-          <p className="mt-2 line-clamp-3 text-[14px] leading-6 whitespace-pre-wrap text-text-secondary">
-            {getExcerpt(note.content || '点击开始记录内容', 150)}
-          </p>
-
-          <div className="mt-4 flex items-center gap-2 text-[11px] text-text-muted">
-            {syncStatus && SyncIcon ? (
-              <span className={`inline-flex items-center gap-1 ${syncStatus.className}`}>
-                <SyncIcon className="size-3" />
-                {syncStatus.label}
-              </span>
-            ) : null}
-            <time className="ml-auto" dateTime={note.updatedAt}>
-              {formatNoteDate(note.updatedAt)}
-            </time>
-          </div>
-        </div>
-
+      <article className="flex min-w-0 max-w-full flex-col overflow-hidden">
         {previewImage ? (
           <img
             src={`data:${previewImage.mimeType};base64,${previewImage.base64}`}
             alt=""
             loading="lazy"
-            className="h-20 w-[76px] rounded-[12px] border border-divider object-cover bg-surface-muted"
+            className="order-first mb-3 aspect-[4/3] w-full max-w-full rounded-[11px] border border-divider bg-surface-muted object-cover"
           />
         ) : null}
+
+        <div className="min-w-0 max-w-full overflow-hidden">
+          <div className="flex min-w-0 items-start gap-1.5">
+            <h3 className="line-clamp-2 min-w-0 flex-1 break-words text-[15px] leading-[1.45] font-semibold tracking-[-0.01em] text-text-primary [overflow-wrap:anywhere] sm:text-[16px] sm:leading-6">
+              {note.title || '未命名便签'}
+            </h3>
+            {note.pinned ? <Pin className="mt-1 size-3.5 shrink-0 text-accent" aria-label="已固定" /> : null}
+          </div>
+
+          <p className="mt-2 line-clamp-4 min-w-0 max-w-full break-words whitespace-pre-wrap text-[13px] leading-[1.65] text-text-secondary [overflow-wrap:anywhere] sm:line-clamp-3 sm:text-[14px] sm:leading-6">
+            {getExcerpt(note.content || '点击开始记录内容', 150)}
+          </p>
+
+          <div className="mt-3 flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden text-[10px] text-text-muted sm:mt-4 sm:text-[11px]">
+            {syncStatus && SyncIcon ? (
+              <span className={`inline-flex min-w-0 items-center gap-1 truncate ${syncStatus.className}`}>
+                <SyncIcon className="size-3 shrink-0" />
+                <span className="truncate">{syncStatus.label}</span>
+              </span>
+            ) : null}
+            <time className="ml-auto shrink-0" dateTime={note.updatedAt}>
+              {formatNoteDate(note.updatedAt)}
+            </time>
+          </div>
+        </div>
       </article>
     </Link>
   )
