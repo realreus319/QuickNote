@@ -5,25 +5,27 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-app-bg: #f6f6f4;
-  --color-app-bg-alt: #f7f7f5;
+  --color-app-bg: #f7f7f5;
+  --color-app-bg-alt: #f1f1ee;
   --color-surface: #ffffff;
-  --color-text-primary: #1f1f1f;
-  --color-text-secondary: #777777;
-  --color-text-muted: #b5b5b5;
-  --color-divider: #eeeeee;
-  --color-field: #ececea;
-  --color-accent: #f6be3a;
-  --color-accent-alt: #f5c242;
-  --color-danger: #cc5f4c;
-  --radius-card: 24px;
+  --color-surface-muted: #f2f2ef;
+  --color-text-primary: #191918;
+  --color-text-secondary: #6f6f6b;
+  --color-text-muted: #a2a29d;
+  --color-divider: #e7e7e2;
+  --color-field: #f0f0ed;
+  --color-accent: #e3ad27;
+  --color-accent-alt: #f7e4a8;
+  --color-danger: #c94f45;
+  --radius-card: 14px;
   --radius-pill: 999px;
-  --shadow-soft: 0 12px 30px rgba(17, 17, 17, 0.06);
+  --shadow-soft: 0 8px 24px rgba(25, 25, 24, 0.055);
+  --shadow-floating: 0 14px 40px rgba(25, 25, 24, 0.12);
   --font-system:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Microsoft YaHei', sans-serif;
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Microsoft YaHei', sans-serif;
 }
 
@@ -35,38 +37,38 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --background: #ffffff;
-  --foreground: #1f1f1f;
+  --background: #f7f7f5;
+  --foreground: #191918;
   --card: #ffffff;
-  --card-foreground: #1f1f1f;
+  --card-foreground: #191918;
   --popover: #ffffff;
-  --popover-foreground: #1f1f1f;
-  --primary: #f6be3a;
+  --popover-foreground: #191918;
+  --primary: #191918;
   --primary-foreground: #ffffff;
-  --secondary: #f1f0eb;
-  --secondary-foreground: #1f1f1f;
-  --muted: #f4f4f1;
-  --muted-foreground: #777777;
-  --accent: #f9f6e9;
-  --accent-foreground: #1f1f1f;
-  --destructive: #cc5f4c;
-  --border: #eeeeee;
-  --input: #ececea;
-  --ring: rgba(246, 190, 58, 0.45);
-  --chart-1: #f6be3a;
-  --chart-2: #777777;
-  --chart-3: #1f1f1f;
-  --chart-4: #d9d4ca;
-  --chart-5: #b5b5b5;
-  --radius: 1rem;
+  --secondary: #f0f0ed;
+  --secondary-foreground: #191918;
+  --muted: #f2f2ef;
+  --muted-foreground: #6f6f6b;
+  --accent: #fff7dc;
+  --accent-foreground: #191918;
+  --destructive: #c94f45;
+  --border: #e7e7e2;
+  --input: #e7e7e2;
+  --ring: rgba(227, 173, 39, 0.45);
+  --chart-1: #e3ad27;
+  --chart-2: #6f6f6b;
+  --chart-3: #191918;
+  --chart-4: #d8d8d2;
+  --chart-5: #a2a29d;
+  --radius: 0.75rem;
   --sidebar: #fbfbf9;
-  --sidebar-foreground: #1f1f1f;
-  --sidebar-primary: #1f1f1f;
+  --sidebar-foreground: #191918;
+  --sidebar-primary: #191918;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f4f4f1;
-  --sidebar-accent-foreground: #1f1f1f;
-  --sidebar-border: #eeeeee;
-  --sidebar-ring: rgba(246, 190, 58, 0.45);
+  --sidebar-accent: #f2f2ef;
+  --sidebar-accent-foreground: #191918;
+  --sidebar-border: #e7e7e2;
+  --sidebar-ring: rgba(227, 173, 39, 0.45);
 }
 
 * {
@@ -76,14 +78,19 @@
 html,
 body,
 #root {
-  min-height: 100vh;
+  min-height: 100%;
+}
+
+html {
+  background: var(--color-app-bg);
 }
 
 body {
+  min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
-  background:
-    radial-gradient(circle at top left, rgba(246, 190, 58, 0.12), transparent 30%),
-    linear-gradient(180deg, var(--color-app-bg-alt) 0%, var(--color-app-bg) 100%);
+  overflow-x: hidden;
+  background: var(--color-app-bg);
 }
 
 button,
@@ -94,6 +101,7 @@ textarea {
 
 button {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 textarea {
@@ -106,7 +114,12 @@ a {
 }
 
 ::selection {
-  background: rgba(246, 190, 58, 0.3);
+  background: rgba(227, 173, 39, 0.22);
+}
+
+:focus-visible {
+  outline: 2px solid rgba(227, 173, 39, 0.72);
+  outline-offset: 2px;
 }
 
 @theme inline {
@@ -156,9 +169,11 @@ a {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   html {
     @apply font-sans;
   }
@@ -166,30 +181,55 @@ a {
 
 @layer utilities {
   .bg-memo-card {
-    background-color: rgba(255, 255, 255, 0.92);
-    box-shadow: var(--shadow-soft);
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-divider);
+  }
+
+  .surface-panel {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-divider);
+    border-radius: 18px;
+  }
+
+  .surface-card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-divider);
+    border-radius: 14px;
   }
 
   .app-shell-width {
-    width: min(100%, 1360px);
+    width: min(100%, 1480px);
     margin-inline: auto;
+  }
+
+  .safe-bottom-nav {
+    padding-bottom: calc(6.75rem + env(safe-area-inset-bottom));
+  }
+
+  .safe-bottom-editor {
+    padding-bottom: calc(6.25rem + env(safe-area-inset-bottom));
+  }
+
+  .shadow-floating {
+    box-shadow: var(--shadow-floating);
   }
 }
 
 .note-rich-editor[data-empty='true']::before {
   content: attr(data-placeholder);
   position: absolute;
-  color: #d4d4d4;
+  color: #b8b8b2;
   pointer-events: none;
 }
 
 .note-rich-editor {
-  font-synthesis: weight style;
-  cursor: text;
   position: relative;
+  cursor: text;
+  font-synthesis: weight style;
   user-select: text;
   -webkit-user-select: text;
   -webkit-touch-callout: default;
+  overflow-wrap: anywhere;
 }
 
 .note-rich-editor,
@@ -203,7 +243,7 @@ a {
 .note-rich-editor ul,
 .note-rich-editor ol,
 .note-rich-editor blockquote {
-  margin: 0 0 0.9rem;
+  margin: 0 0 1rem;
 }
 
 .note-rich-editor li > p {
@@ -212,7 +252,7 @@ a {
 
 .note-rich-editor ul,
 .note-rich-editor ol {
-  padding-left: 1.5rem;
+  padding-left: 1.45rem;
 }
 
 .note-rich-editor ul {
@@ -224,31 +264,32 @@ a {
 }
 
 .note-rich-editor blockquote {
-  border-left: 3px solid #ece7da;
+  border-left: 2px solid #d8d5cb;
   padding-left: 1rem;
-  color: #5d5d5d;
+  color: #5f5f5b;
 }
 
 .note-rich-editor figure {
-  margin: 1.2rem 0;
+  margin: 1.4rem 0;
 }
 
 .note-rich-editor img {
   display: block;
-  width: min(100%, 560px);
-  border-radius: 24px;
-  background: #f7f6f1;
+  width: min(100%, 640px);
+  border: 1px solid var(--color-divider);
+  border-radius: 16px;
+  background: var(--color-surface-muted);
   -webkit-user-drag: none;
 }
 
 .note-rich-editor .ProseMirror-selectednode img {
-  outline: 2px solid rgba(246, 190, 58, 0.65);
+  outline: 2px solid rgba(227, 173, 39, 0.72);
   outline-offset: 3px;
 }
 
 .note-rich-editor strong,
 .note-rich-editor b {
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .note-rich-editor em,
@@ -268,15 +309,32 @@ a {
 .note-rich-editor a {
   color: inherit;
   text-decoration: underline;
+  text-decoration-color: rgba(227, 173, 39, 0.75);
   text-underline-offset: 3px;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d7d7d1 transparent;
+}
+
 ::view-transition-group(*) {
-  animation-duration: 260ms;
+  animation-duration: 220ms;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 ::view-transition-old(*),
 ::view-transition-new(*) {
-  animation-duration: 260ms;
+  animation-duration: 220ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
