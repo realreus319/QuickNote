@@ -105,12 +105,12 @@ function NoteDetailPage() {
     try {
       if (navigator.share) {
         await navigator.share({
-          title: title || 'QuickNote 便签',
+          title: title || 'QuickNote 笔记',
           text: shareText,
         })
       } else {
         await navigator.clipboard.writeText(shareText)
-        toast('已复制便签内容')
+        toast('已复制笔记内容')
       }
     } catch {
       toast('分享已取消')
@@ -118,23 +118,22 @@ function NoteDetailPage() {
   }
 
   if (!note) {
-    return <LoadingState label="正在打开便签…" />
+    return <LoadingState label="正在打开笔记…" />
   }
 
   if (note.deleted) {
-    return <EmptyState title="便签已删除" description="这条便签已经移出列表。" />
+    return <EmptyState title="笔记已删除" description="这条笔记已经移出列表。" />
   }
 
   return (
     <section
-      className="min-h-screen bg-white"
-      style={{
-        viewTransitionName: `note-card-${note.id}`,
-      }}
+      className="min-h-dvh bg-white"
+      style={{ viewTransitionName: `note-card-${note.id}` }}
     >
-      <div className="mx-auto w-full max-w-3xl px-5 pt-3 pb-16 md:px-10 md:pt-6">
+      <div className="mx-auto w-full max-w-[900px] px-4 pb-10 sm:px-6 lg:px-10">
         <NoteDetailHeader
           pinned={note.pinned}
+          syncStatus={note.syncStatus}
           onBack={() => runWithViewTransition(() => navigate({ to: '/notes' }))}
           onDelete={() => void handleDelete()}
           onShare={() => void handleShare()}
