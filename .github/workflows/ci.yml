@@ -43,7 +43,23 @@ jobs:
           retention-days: 3
 
       - name: Test
-        run: pnpm test:run
+        run: pnpm test:run 2>&1 | tee test.log
+
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: test.log
+          retention-days: 3
 
       - name: Build
-        run: pnpm build
+        run: pnpm build 2>&1 | tee build.log
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: build.log
+          retention-days: 3
