@@ -121,8 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearMsalCacheRecoveryAttempt(window.sessionStorage)
 
     try {
-      await msalInstance.clearCache()
-      await msalInstance.loginRedirect(loginRequest)
+      await startInteractiveRecovery(true)
     } catch (caughtError) {
       setError(getMsalAuthErrorMessage(caughtError))
     }
