@@ -71,6 +71,88 @@
   --sidebar-ring: rgba(227, 173, 39, 0.45);
 }
 
+[data-note-color='yellow'] {
+  --note-paper: oklch(0.965 0.035 88);
+  --note-accent: oklch(0.72 0.105 84);
+  --note-ink: oklch(0.27 0.045 78);
+  --note-muted: oklch(0.45 0.036 78);
+  --note-placeholder: oklch(0.66 0.034 82);
+}
+
+[data-note-color='blue'] {
+  --note-paper: oklch(0.958 0.025 232);
+  --note-accent: oklch(0.63 0.075 232);
+  --note-ink: oklch(0.27 0.035 232);
+  --note-muted: oklch(0.45 0.034 232);
+  --note-placeholder: oklch(0.65 0.032 232);
+}
+
+[data-note-color='green'] {
+  --note-paper: oklch(0.958 0.026 145);
+  --note-accent: oklch(0.62 0.075 145);
+  --note-ink: oklch(0.26 0.035 145);
+  --note-muted: oklch(0.44 0.034 145);
+  --note-placeholder: oklch(0.64 0.032 145);
+}
+
+[data-note-color='pink'] {
+  --note-paper: oklch(0.962 0.027 8);
+  --note-accent: oklch(0.67 0.08 8);
+  --note-ink: oklch(0.28 0.038 8);
+  --note-muted: oklch(0.46 0.034 8);
+  --note-placeholder: oklch(0.66 0.032 8);
+}
+
+[data-note-color='white'] {
+  --note-paper: oklch(0.985 0.006 85);
+  --note-accent: oklch(0.68 0.012 85);
+  --note-ink: oklch(0.24 0.008 85);
+  --note-muted: oklch(0.46 0.01 85);
+  --note-placeholder: oklch(0.66 0.009 85);
+}
+
+.note-paper,
+.note-color-swatch,
+.note-color-indicator {
+  --note-line: color-mix(in oklch, var(--note-accent) 26%, var(--note-paper));
+  --note-paper-raised: color-mix(in oklch, var(--note-paper) 80%, oklch(0.995 0.004 85));
+}
+
+.note-paper {
+  --foreground: var(--note-ink);
+  --muted: var(--note-paper-raised);
+  --muted-foreground: var(--note-muted);
+  --border: var(--note-line);
+  --ring: var(--note-accent);
+  color: var(--note-ink);
+}
+
+.note-paper-card {
+  border-color: var(--note-line);
+  background: var(--note-paper);
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--note-accent) 8%, transparent);
+}
+
+.note-paper-card:hover {
+  border-color: color-mix(in oklch, var(--note-accent) 48%, var(--note-paper));
+  box-shadow: 0 12px 30px color-mix(in oklch, var(--note-accent) 12%, transparent);
+}
+
+.note-detail-surface {
+  background: var(--note-paper);
+}
+
+.note-detail-header {
+  border-color: color-mix(in oklch, var(--note-line) 82%, transparent);
+  background: color-mix(in oklch, var(--note-paper) 91%, transparent);
+}
+
+.note-color-swatch,
+.note-color-indicator {
+  border-color: var(--note-line);
+  background: var(--note-paper);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -118,7 +200,7 @@ a {
 }
 
 :focus-visible {
-  outline: 2px solid rgba(227, 173, 39, 0.72);
+  outline: 2px solid var(--ring, rgba(227, 173, 39, 0.72));
   outline-offset: 2px;
 }
 

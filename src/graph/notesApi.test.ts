@@ -11,6 +11,8 @@ import {
   canReuseRemoteAttachments,
   fetchRemoteNotes,
   isRemoteImageAttachment,
+  MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+  readRemoteNoteColor,
 } from '@/graph/notesApi'
 import type { LocalNote } from '@/types/domain'
 
@@ -40,6 +42,19 @@ describe('notesApi', () => {
     expect(canReuseRemoteAttachments('change-key-2', undefined)).toBe(false)
   })
 
+  it('reads the Microsoft Sticky Note color extended property', () => {
+    expect(
+      readRemoteNoteColor({
+        singleValueExtendedProperties: [
+          {
+            id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+            value: '1',
+          },
+        ],
+      }),
+    ).toBe('green')
+  })
+
   it('does not request attachment data again when the cached remote version is current', async () => {
     const cachedAttachment = {
       id: 'local-image-1',
@@ -59,6 +74,7 @@ describe('notesApi', () => {
       bodyHtml:
         '<figure><img src="quicknote-asset://local-image-1" data-attachment-id="local-image-1"></figure>',
       attachments: [cachedAttachment],
+      color: 'yellow',
       pinned: false,
       source: 'microsoft-notes',
       createdAt: '2026-07-20T00:00:00.000Z',
@@ -98,7 +114,9 @@ describe('notesApi', () => {
         : undefined
 
     expect(cachedAttachments).toEqual([cachedAttachment])
+    expect(notes[0]?.quicknoteColor).toBe('yellow')
     expect(requestedPaths.some((path) => path.includes('/attachments'))).toBe(false)
+    expect(requestedPaths.some((path) => path.includes(encodeURIComponent(MICROSOFT_NOTE_COLOR_PROPERTY_ID)))).toBe(true)
     expect(graphClientMocks.graphFetchBlob).not.toHaveBeenCalled()
   })
 })

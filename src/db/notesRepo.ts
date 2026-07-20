@@ -3,6 +3,7 @@ import { enqueuePendingOperation } from '@/db/pendingRepo'
 import type { LocalNote, LocalNoteAttachment } from '@/types/domain'
 import { toIsoNow } from '@/utils/date'
 import { generateLocalId } from '@/utils/id'
+import { DEFAULT_NOTE_COLOR, normalizeNoteColor } from '@/utils/noteColor'
 import {
   convertRemoteNoteHtmlToStoredHtml,
   derivePlainTextFromStoredHtml,
@@ -36,6 +37,7 @@ export async function createNote() {
     content: '',
     bodyHtml: '<p></p>',
     attachments: [],
+    color: DEFAULT_NOTE_COLOR,
     pinned: false,
     source: 'local',
     createdAt: now,
@@ -51,7 +53,7 @@ export async function createNote() {
 
 export async function updateNote(
   noteId: string,
-  patch: Partial<Pick<LocalNote, 'title' | 'bodyHtml' | 'pinned' | 'attachments'>>,
+  patch: Partial<Pick<LocalNote, 'title' | 'bodyHtml' | 'pinned' | 'attachments' | 'color'>>,
 ) {
   const current = await db.notes.get(noteId)
 
@@ -152,6 +154,7 @@ export async function syncRemoteNotes(notes: Array<Record<string, unknown>>) {
         }
       : splitRemoteNoteContent(rawContent)
     const shouldPreserveExistingAttachments = Boolean(item.quicknoteAttachmentsError)
+    const remoteColor = normalizeNoteColor(item.quicknoteColor)
 
     return {
       id: existing?.id ?? generateLocalId('note'),
@@ -162,6 +165,7 @@ export async function syncRemoteNotes(notes: Array<Record<string, unknown>>) {
       attachments: shouldPreserveExistingAttachments
         ? existing?.attachments ?? []
         : remoteAttachments,
+      color: remoteColor,
       pinned: existing?.pinned ?? false,
       source: 'microsoft-notes',
       createdAt: readString(item.createdDateTime, existing?.createdAt ?? now),
@@ -169,6 +173,7 @@ export async function syncRemoteNotes(notes: Array<Record<string, unknown>>) {
       lastSyncedAt: now,
       lastSyncedTitle: remoteTitle,
       lastSyncedBodyHtml: richHtml ?? '<p></p>',
+      lastSyncedColor: remoteColor,
       remoteChangeKey: readString(item.changeKey, existing?.remoteChangeKey ?? ''),
       remoteAttachmentsChangeKey: readString(
         item.quicknoteAttachmentsChangeKey,
@@ -201,6 +206,7 @@ export async function applySyncedNote(noteId: string, remoteId: string) {
     lastSyncedAt: toIsoNow(),
     lastSyncedTitle: note.title,
     lastSyncedBodyHtml: note.bodyHtml,
+    lastSyncedColor: note.color,
   })
 }
 
@@ -211,6 +217,7 @@ interface AppliedRemoteNoteSnapshot {
   lastSyncedBodyHtml: string
   content: string
   attachments: LocalNoteAttachment[]
+  color: LocalNote['color']
   remoteChangeKey?: string
 }
 
@@ -229,11 +236,13 @@ export async function applyRemoteNoteSnapshot(
     content: snapshot.content,
     bodyHtml: snapshot.bodyHtml,
     attachments: snapshot.attachments,
+    color: snapshot.color,
     source: 'microsoft-notes',
     syncStatus: 'synced',
     lastSyncedAt: toIsoNow(),
     lastSyncedTitle: snapshot.title,
     lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
+    lastSyncedColor: snapshot.color,
     remoteChangeKey: snapshot.remoteChangeKey,
     remoteAttachmentsChangeKey: snapshot.remoteChangeKey,
   })

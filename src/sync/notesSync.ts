@@ -25,6 +25,7 @@ async function applySnapshot(noteId: string, snapshot: RemoteNoteSnapshot) {
     lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
     content: snapshot.content,
     attachments: snapshot.attachments,
+    color: snapshot.color,
     remoteChangeKey: snapshot.remoteChangeKey,
   })
 }

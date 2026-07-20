@@ -195,7 +195,7 @@ export function NoteEditor({
       editorProps: {
         attributes: {
           class:
-            'note-rich-editor min-h-[65svh] text-[17px] leading-8 text-text-primary outline-none md:text-[18px] md:leading-9',
+            'note-rich-editor min-h-[65svh] text-[17px] leading-8 text-[color:var(--note-ink,var(--color-text-primary))] outline-none md:text-[18px] md:leading-9',
           'data-placeholder': '开始记录内容…',
           spellcheck: 'true',
           autocapitalize: 'sentences',
@@ -356,9 +356,9 @@ export function NoteEditor({
           value={title}
           onChange={(event) => onTitleChange(event.target.value)}
           placeholder="标题"
-          className="w-full border-none bg-transparent px-0 text-[34px] leading-[1.12] font-semibold tracking-[-0.035em] text-text-primary outline-none placeholder:text-[#c8c8c2] md:text-[42px]"
+          className="w-full border-none bg-transparent px-0 text-[34px] leading-[1.12] font-semibold tracking-[-0.035em] text-[color:var(--note-ink,var(--color-text-primary))] outline-none placeholder:text-[color:var(--note-placeholder,#c8c8c2)] md:text-[42px]"
         />
-        <p className="mt-3 text-xs text-text-muted">
+        <p className="mt-3 text-xs text-[color:var(--note-muted,var(--color-text-muted))]">
           {formatLongDate(updatedAt)} · {getWordCount(title, plainText)}
         </p>
       </div>
@@ -381,7 +381,7 @@ export function NoteEditor({
       />
 
       <div
-        className="fixed right-4 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-4 z-40 flex items-center gap-1 overflow-x-auto rounded-[18px] border border-divider bg-white/94 p-1.5 shadow-floating backdrop-blur-xl md:sticky md:top-4 md:right-auto md:bottom-auto md:left-auto md:z-20 md:mt-6 md:w-fit md:max-w-full md:shadow-[0_8px_24px_rgba(25,25,24,0.07)]"
+        className="fixed right-4 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-4 z-40 flex items-center gap-1 overflow-x-auto rounded-[18px] border border-[color:var(--note-line,var(--color-divider))] bg-[color:var(--note-paper-raised,var(--color-surface))] p-1.5 shadow-floating backdrop-blur-xl md:sticky md:top-4 md:right-auto md:bottom-auto md:left-auto md:z-20 md:mt-6 md:w-fit md:max-w-full md:shadow-[0_8px_24px_rgba(25,25,24,0.07)]"
         role="toolbar"
         aria-label="文本格式"
       >
@@ -389,7 +389,7 @@ export function NoteEditor({
           type="button"
           variant={toolbarState.bold ? 'secondary' : 'ghost'}
           size="icon-sm"
-          className={cn('shrink-0 rounded-[10px]', toolbarState.bold && 'bg-surface-muted shadow-none')}
+          className={cn('shrink-0 rounded-[10px]', toolbarState.bold && 'bg-[color:var(--note-line,var(--color-surface-muted))] shadow-none')}
           disabled={!editor}
           aria-label="加粗"
           aria-pressed={toolbarState.bold}
@@ -402,7 +402,7 @@ export function NoteEditor({
           type="button"
           variant={toolbarState.italic ? 'secondary' : 'ghost'}
           size="icon-sm"
-          className={cn('shrink-0 rounded-[10px]', toolbarState.italic && 'bg-surface-muted shadow-none')}
+          className={cn('shrink-0 rounded-[10px]', toolbarState.italic && 'bg-[color:var(--note-line,var(--color-surface-muted))] shadow-none')}
           disabled={!editor}
           aria-label="斜体"
           aria-pressed={toolbarState.italic}
@@ -415,7 +415,7 @@ export function NoteEditor({
           type="button"
           variant={toolbarState.bulletList ? 'secondary' : 'ghost'}
           size="icon-sm"
-          className={cn('shrink-0 rounded-[10px]', toolbarState.bulletList && 'bg-surface-muted shadow-none')}
+          className={cn('shrink-0 rounded-[10px]', toolbarState.bulletList && 'bg-[color:var(--note-line,var(--color-surface-muted))] shadow-none')}
           disabled={!editor}
           aria-label="无序列表"
           aria-pressed={toolbarState.bulletList}
@@ -430,7 +430,7 @@ export function NoteEditor({
           type="button"
           variant={toolbarState.orderedList ? 'secondary' : 'ghost'}
           size="icon-sm"
-          className={cn('shrink-0 rounded-[10px]', toolbarState.orderedList && 'bg-surface-muted shadow-none')}
+          className={cn('shrink-0 rounded-[10px]', toolbarState.orderedList && 'bg-[color:var(--note-line,var(--color-surface-muted))] shadow-none')}
           disabled={!editor}
           aria-label="有序列表"
           aria-pressed={toolbarState.orderedList}
@@ -442,7 +442,10 @@ export function NoteEditor({
           <ListOrdered className="size-4" />
         </Button>
 
-        <span className="mx-1 h-5 w-px shrink-0 bg-divider" aria-hidden="true" />
+        <span
+          className="mx-1 h-5 w-px shrink-0 bg-[color:var(--note-line,var(--color-divider))]"
+          aria-hidden="true"
+        />
 
         <Button
           type="button"
@@ -502,7 +505,7 @@ export function NoteEditor({
         <EditorContent editor={editor} />
       </div>
 
-      <p className="mt-10 border-t border-divider pt-4 text-xs text-text-muted">
+      <p className="mt-10 border-t border-[color:var(--note-line,var(--color-divider))] pt-4 text-xs text-[color:var(--note-muted,var(--color-text-muted))]">
         自动保存到本地，联网后继续同步。
       </p>
     </div>

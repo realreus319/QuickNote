@@ -18,11 +18,23 @@ import {
   RichTextMergeError,
 } from '@/utils/noteRichHtml'
 import { sortAttachmentsByBodyOrder } from '@/utils/noteAttachments'
+import {
+  normalizeNoteColor,
+  noteColorFromMicrosoftValue,
+  noteColorToMicrosoftValue,
+  resolveSyncedNoteColor,
+} from '@/utils/noteColor'
 import { readString } from '@/utils/text'
 
 const QUICKNOTE_RICH_HTML_PROPERTY_ID =
   'String {66f5a359-4659-4830-9070-00040ec6ac6e} Name QuickNoteRichHtml'
 const QUICKNOTE_RICH_HTML_QUERY_ID = encodeURIComponent(QUICKNOTE_RICH_HTML_PROPERTY_ID)
+export const MICROSOFT_NOTE_COLOR_PROPERTY_ID =
+  'Integer {0006200E-0000-0000-C000-000000000046} Id 0x8B00'
+const MICROSOFT_NOTE_COLOR_QUERY_ID = encodeURIComponent(MICROSOFT_NOTE_COLOR_PROPERTY_ID)
+const NOTE_EXTENDED_PROPERTIES_FILTER =
+  `id%20eq%20'${QUICKNOTE_RICH_HTML_QUERY_ID}'%20or%20` +
+  `id%20eq%20'${MICROSOFT_NOTE_COLOR_QUERY_ID}'`
 
 interface MailFolderResponse {
   value?: Array<{
@@ -54,9 +66,9 @@ interface RemoteAttachmentRecord extends Record<string, unknown> {
 }
 
 const NOTES_MESSAGES_QUERY =
-  `$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=id%20eq%20'${QUICKNOTE_RICH_HTML_QUERY_ID}')&$orderby=lastModifiedDateTime%20desc&$top=100`
+  `$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})&$orderby=lastModifiedDateTime%20desc&$top=100`
 const SINGLE_NOTE_QUERY =
-  `$select=id,subject,body,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=id%20eq%20'${QUICKNOTE_RICH_HTML_QUERY_ID}')`
+  `$select=id,subject,body,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})`
 const ATTACHMENT_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024
 
 let notesMessagesPathPromise: Promise<string> | null = null
@@ -105,6 +117,7 @@ export interface RemoteNoteSnapshot {
   lastSyncedBodyHtml: string
   content: string
   attachments: LocalNoteAttachment[]
+  color: LocalNote['color']
   remoteChangeKey?: string
 }
 
@@ -112,6 +125,7 @@ function buildRemoteNotePayload(
   title: string | undefined,
   bodyHtml: string | undefined,
   canonicalBodyHtml: string | undefined,
+  color: LocalNote['color'] | undefined,
   includeMessageClass = false,
 ) {
   const payload: Record<string, unknown> = {}
@@ -132,6 +146,13 @@ function buildRemoteNotePayload(
     extendedProperties.push({
       id: QUICKNOTE_RICH_HTML_PROPERTY_ID,
       value: canonicalBodyHtml,
+    })
+  }
+
+  if (color != null) {
+    extendedProperties.push({
+      id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+      value: noteColorToMicrosoftValue(color),
     })
   }
 
@@ -254,6 +275,7 @@ function buildRemoteNoteSnapshot(
     lastSyncedBodyHtml: sourceBodyHtml,
     content: derivePlainTextFromStoredHtml(storedBodyHtml),
     attachments,
+    color: readRemoteNoteColor(message),
     remoteChangeKey: readString(message.changeKey),
   }
 }
@@ -262,6 +284,14 @@ export function isRemoteImageAttachment(attachment: RemoteAttachmentRecord) {
   const contentType = readString(attachment.contentType).toLowerCase()
 
   return contentType.startsWith('image/')
+}
+
+export function readRemoteNoteColor(message: RemoteMessageRecord) {
+  const value = message.singleValueExtendedProperties?.find(
+    (property) => property.id === MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+  )?.value
+
+  return noteColorFromMicrosoftValue(value)
 }
 
 export function canReuseRemoteAttachments(
@@ -546,6 +576,7 @@ export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNo
       const cachedNote = cachedNotesByRemoteId.get(messageId)
       const bodyHtml = readString(message.body?.content)
       const richHtml = readRemoteRichHtml(message)
+      const color = readRemoteNoteColor(message)
       const needsAttachmentHydration =
         readBoolean(message.hasAttachments) ||
         messageNeedsAttachmentHydration(bodyHtml, richHtml)
@@ -556,6 +587,7 @@ export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNo
           quicknoteAttachments: [],
           quicknoteAttachmentsChangeKey: remoteChangeKey,
           quicknoteRichHtml: richHtml,
+          quicknoteColor: color,
         }
       }
 
@@ -563,6 +595,7 @@ export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNo
         return {
           ...message,
           quicknoteRichHtml: richHtml,
+          quicknoteColor: color,
           quicknoteAttachments: cachedNote?.attachments ?? [],
           quicknoteAttachmentsChangeKey: remoteChangeKey,
         }
@@ -572,6 +605,7 @@ export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNo
         return {
           ...message,
           quicknoteRichHtml: richHtml,
+          quicknoteColor: color,
           quicknoteAttachments: await fetchRemoteNoteAttachments(
             accessToken,
             messageId,
@@ -584,6 +618,7 @@ export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNo
         return {
           ...message,
           quicknoteRichHtml: richHtml,
+          quicknoteColor: color,
           quicknoteAttachmentsError: true,
         }
       }
@@ -596,7 +631,15 @@ export async function createRemoteNote(accessToken: string, note: LocalNote) {
   const remoteBodyHtml = prepareRemoteNoteHtml(note.bodyHtml, note.attachments)
   const created = await graphFetch<Record<string, unknown>>(accessToken, messagesPath, {
     method: 'POST',
-    body: JSON.stringify(buildRemoteNotePayload(note.title, remoteBodyHtml, note.bodyHtml, true)),
+    body: JSON.stringify(
+      buildRemoteNotePayload(
+        note.title,
+        remoteBodyHtml,
+        note.bodyHtml,
+        normalizeNoteColor(note.color),
+        true,
+      ),
+    ),
   })
   const remoteId = readString(created.id)
 
@@ -631,6 +674,12 @@ export async function updateRemoteNote(accessToken: string, note: LocalNote) {
   const currentRemote = await fetchRemoteNoteSnapshot(accessToken, note.remoteId)
   const currentRemoteCanonicalHtml = currentRemote.lastSyncedBodyHtml
   const localCanonicalHtml = note.bodyHtml
+  const localColor = normalizeNoteColor(note.color)
+  const targetColor = resolveSyncedNoteColor(
+    note.lastSyncedColor,
+    localColor,
+    currentRemote.color,
+  )
   const remoteChanged =
     Boolean(note.remoteChangeKey) &&
     Boolean(currentRemote.remoteChangeKey) &&
@@ -668,6 +717,7 @@ export async function updateRemoteNote(accessToken: string, note: LocalNote) {
       ? prepareRemoteNoteHtml(targetCanonicalHtml, note.attachments)
       : undefined,
     targetCanonicalHtml !== currentRemoteCanonicalHtml ? targetCanonicalHtml : undefined,
+    targetColor !== currentRemote.color ? targetColor : undefined,
   )
 
   if (Object.keys(payload).length) {

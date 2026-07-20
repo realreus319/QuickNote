@@ -13,36 +13,41 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { NoteColorPicker } from '@/components/notes/NoteColorPicker'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { NoteSyncStatus } from '@/types/domain'
+import type { NoteColor, NoteSyncStatus } from '@/types/domain'
 
 interface NoteDetailHeaderProps {
   pinned: boolean
+  color: NoteColor
   syncStatus: NoteSyncStatus
   onBack: () => void
   onDelete: () => void
   onShare: () => void
+  onColorChange: (color: NoteColor) => void
   onTogglePin: () => void
 }
 
 const syncPresentation = {
-  synced: { icon: Check, label: '已同步', className: 'text-text-muted' },
-  pending: { icon: CloudOff, label: '等待同步', className: 'text-text-muted' },
+  synced: { icon: Check, label: '已同步', className: 'text-[color:var(--note-muted)]' },
+  pending: { icon: CloudOff, label: '等待同步', className: 'text-[color:var(--note-muted)]' },
   conflict: { icon: TriangleAlert, label: '需要处理', className: 'text-[color:var(--color-danger)]' },
   error: { icon: TriangleAlert, label: '同步失败', className: 'text-[color:var(--color-danger)]' },
 } as const
 
 export function NoteDetailHeader({
   pinned,
+  color,
   syncStatus,
   onBack,
   onDelete,
   onShare,
+  onColorChange,
   onTogglePin,
 }: NoteDetailHeaderProps) {
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -51,7 +56,7 @@ export function NoteDetailHeader({
 
   return (
     <>
-      <div className="sticky top-0 z-30 -mx-4 flex min-h-16 items-center justify-between border-b border-divider/75 bg-white/92 px-3 backdrop-blur-xl sm:-mx-6 sm:px-5 lg:-mx-10 lg:px-8">
+      <div className="note-detail-header sticky top-0 z-30 -mx-4 flex min-h-16 items-center justify-between border-b px-3 backdrop-blur-xl sm:-mx-6 sm:px-5 lg:-mx-10 lg:px-8">
         <div className="flex min-w-0 items-center gap-2">
           <Button
             variant="ghost"
@@ -69,6 +74,7 @@ export function NoteDetailHeader({
         </div>
 
         <div className="flex items-center gap-1">
+          <NoteColorPicker color={color} onColorChange={onColorChange} />
           <Button
             variant="ghost"
             size="icon-lg"

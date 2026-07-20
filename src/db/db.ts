@@ -7,6 +7,7 @@ import type {
   LocalTodoList,
   PendingOperation,
 } from '@/types/domain'
+import { migrateNoteColorState } from '@/utils/noteColor'
 
 class QuickNoteDatabase extends Dexie {
   notes!: Table<LocalNote, string>
@@ -25,6 +26,29 @@ class QuickNoteDatabase extends Dexie {
       pendingOperations: 'id, entityType, localId, createdAt',
       appState: 'key',
     })
+
+    this.version(5)
+      .stores({
+        notes: 'id, remoteId, updatedAt, pinned, syncStatus, deleted',
+        todoLists: 'id, remoteId, wellknownListName',
+        todos: 'id, remoteId, listId, status, dueDateTime, syncStatus, deleted',
+        pendingOperations: 'id, entityType, localId, createdAt',
+        appState: 'key',
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<LocalNote, string>('notes')
+          .toCollection()
+          .modify((note) => {
+            const migrated = migrateNoteColorState(
+              note.color,
+              note.lastSyncedColor,
+              Boolean(note.remoteId),
+            )
+            note.color = migrated.color
+            note.lastSyncedColor = migrated.lastSyncedColor
+          })
+      })
   }
 }
 

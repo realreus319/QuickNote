@@ -8,13 +8,14 @@ import { LoadingState } from '@/components/common/LoadingState'
 import { NoteDetailHeader } from '@/components/notes/NoteDetailHeader'
 import { NoteEditor } from '@/components/notes/NoteEditor'
 import { deleteNote, getNoteById, updateNote } from '@/db/notesRepo'
-import type { LocalNoteAttachment } from '@/types/domain'
+import type { LocalNoteAttachment, NoteColor } from '@/types/domain'
 import {
   buildNoteContentSignature,
   buildNoteSnapshotSignature,
   shouldAutosaveNote,
 } from '@/utils/noteHydration'
 import { derivePlainTextFromStoredHtml } from '@/utils/noteRichHtml'
+import { normalizeNoteColor } from '@/utils/noteColor'
 import { runWithViewTransition } from '@/utils/viewTransition'
 
 function NoteDetailPage() {
@@ -98,6 +99,12 @@ function NoteDetailPage() {
     })
   }
 
+  async function handleColorChange(color: NoteColor) {
+    if (!note || normalizeNoteColor(note.color) === color) return
+
+    await updateNote(noteId, { color })
+  }
+
   async function handleShare() {
     const plainText = derivePlainTextFromStoredHtml(bodyHtml)
     const shareText = title ? `${title}\n\n${plainText}` : plainText
@@ -127,16 +134,19 @@ function NoteDetailPage() {
 
   return (
     <section
-      className="min-h-dvh bg-white"
+      className="note-paper note-detail-surface min-h-dvh"
+      data-note-color={normalizeNoteColor(note.color)}
       style={{ viewTransitionName: `note-card-${note.id}` }}
     >
       <div className="mx-auto w-full max-w-[900px] px-4 pb-10 sm:px-6 lg:px-10">
         <NoteDetailHeader
           pinned={note.pinned}
+          color={normalizeNoteColor(note.color)}
           syncStatus={note.syncStatus}
           onBack={() => runWithViewTransition(() => navigate({ to: '/notes' }))}
           onDelete={() => void handleDelete()}
           onShare={() => void handleShare()}
+          onColorChange={(color) => void handleColorChange(color)}
           onTogglePin={() => void handleTogglePinned()}
         />
         <NoteEditor
