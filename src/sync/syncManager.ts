@@ -16,7 +16,11 @@ async function setSyncStatus(status: SyncResult['status'], extra?: Record<string
   }
 }
 
-export async function syncAll(getAccessToken: () => Promise<string>, isAuthenticated: boolean) {
+export async function syncAll(
+  getAccessToken: () => Promise<string>,
+  isAuthenticated: boolean,
+  homeAccountId: string,
+) {
   if (!isAuthenticated) {
     await setSyncStatus('unauthenticated')
     return {
@@ -55,7 +59,7 @@ export async function syncAll(getAccessToken: () => Promise<string>, isAuthentic
   for (const operation of pendingOperations) {
     try {
       if (operation.entityType === 'note') {
-        await replayNoteOperation(accessToken, operation)
+        await replayNoteOperation(accessToken, operation, homeAccountId)
       } else {
         await replayTodoOperation(accessToken, operation)
       }
@@ -79,7 +83,7 @@ export async function syncAll(getAccessToken: () => Promise<string>, isAuthentic
   let todosError: string | undefined
 
   try {
-    await pullNotes(accessToken)
+    await pullNotes(accessToken, homeAccountId)
   } catch {
     notesError = '便签同步失败，可稍后重试'
   }

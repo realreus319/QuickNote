@@ -46,6 +46,9 @@ interface MailFolderResponse {
 interface RemoteMessageRecord extends Record<string, unknown> {
   hasAttachments?: boolean
   changeKey?: string
+  '@removed'?: {
+    reason?: string
+  }
   singleValueExtendedProperties?: Array<{
     id?: string
     value?: string
@@ -65,13 +68,21 @@ interface RemoteAttachmentRecord extends Record<string, unknown> {
   isInline?: boolean
 }
 
-const NOTES_MESSAGES_QUERY =
-  `$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})&$orderby=lastModifiedDateTime%20desc&$top=100`
+const NOTES_DELTA_QUERY =
+  `$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})&$top=100`
 const SINGLE_NOTE_QUERY =
   `$select=id,subject,body,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})`
 const ATTACHMENT_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024
 
-let notesMessagesPathPromise: Promise<string> | null = null
+const notesMessagesPathPromises = new Map<string, Promise<string>>()
+
+export interface RemoteNotesDeltaResult {
+  changes: Array<Record<string, unknown>>
+  removedRemoteIds: string[]
+  seenRemoteIds: string[]
+  deltaLink: string
+  initial: boolean
+}
 
 function encodePathSegment(value: string) {
   return encodeURIComponent(value)
@@ -242,21 +253,25 @@ async function resolveNotesMessagesPath(accessToken: string) {
   })
 }
 
-async function getNotesMessagesPath(accessToken: string) {
-  if (!notesMessagesPathPromise) {
-    notesMessagesPathPromise = graphFetch<unknown>(
+async function getNotesMessagesPath(accessToken: string, homeAccountId: string) {
+  const accountKey = homeAccountId.trim()
+  let pathPromise = notesMessagesPathPromises.get(accountKey)
+
+  if (!pathPromise) {
+    pathPromise = graphFetch<unknown>(
       accessToken,
       '/v1.0/me/mailFolders/notes/messages?$top=1',
     )
       .then(() => '/v1.0/me/mailFolders/notes/messages')
       .catch(() => resolveNotesMessagesPath(accessToken))
       .catch((caughtError: unknown) => {
-        notesMessagesPathPromise = null
+        notesMessagesPathPromises.delete(accountKey)
         throw caughtError
       })
+    notesMessagesPathPromises.set(accountKey, pathPromise)
   }
 
-  return notesMessagesPathPromise
+  return pathPromise
 }
 
 function buildRemoteNoteSnapshot(
@@ -330,7 +345,25 @@ function mapRemoteAttachment(
 async function listRemoteAttachmentRefs(accessToken: string, messageId: string) {
   return graphFetch<{ value?: RemoteAttachmentRecord[] }>(
     accessToken,
-    `/v1.0/me/messages/${encodePathSegment(messageId)}/attachments`,
+    `/v1.0/me/messages/${encodePathSegment(messageId)}/attachments?$select=id,name,contentType,size,contentId,isInline`,
+  )
+}
+
+export function canReuseRemoteAttachment(
+  attachment: RemoteAttachmentRecord,
+  cachedAttachment: LocalNoteAttachment | undefined,
+) {
+  const remoteId = readString(attachment.id)
+  const contentId = normalizeNoteContentId(readString(attachment.contentId))
+  const mimeType = readString(attachment.contentType).toLowerCase()
+
+  return Boolean(
+    remoteId &&
+      cachedAttachment?.remoteId === remoteId &&
+      normalizeNoteContentId(cachedAttachment.contentId) === contentId &&
+      cachedAttachment.size === readNumber(attachment.size, -1) &&
+      cachedAttachment.mimeType.toLowerCase() === mimeType &&
+      cachedAttachment.base64,
   )
 }
 
@@ -363,9 +396,15 @@ async function fetchRemoteNoteAttachments(
   messageId: string,
   bodyHtml: string | undefined,
   sourceHtml: string | undefined,
+  cachedAttachments: LocalNoteAttachment[] = [],
 ) {
   const attachments = await listRemoteAttachmentRefs(accessToken, messageId)
   const imageRefs = (attachments.value ?? []).filter(isRemoteImageAttachment)
+  const cachedByRemoteId = new Map(
+    cachedAttachments
+      .filter((attachment) => attachment.remoteId)
+      .map((attachment) => [attachment.remoteId as string, attachment]),
+  )
 
   const resolved = await Promise.all(
     imageRefs.map(async (attachment) => {
@@ -373,6 +412,15 @@ async function fetchRemoteNoteAttachments(
 
       if (!attachmentId) {
         return null
+      }
+
+      const cachedAttachment = cachedByRemoteId.get(attachmentId)
+
+      if (cachedAttachment && canReuseRemoteAttachment(attachment, cachedAttachment)) {
+        return {
+          ...cachedAttachment,
+          name: readString(attachment.name, cachedAttachment.name),
+        }
       }
 
       const detail = await getRemoteAttachmentDetails(accessToken, messageId, attachmentId)
@@ -411,15 +459,28 @@ async function fetchRemoteNoteRecord(accessToken: string, remoteId: string) {
   )
 }
 
-async function fetchRemoteNoteSnapshot(accessToken: string, remoteId: string) {
+async function fetchRemoteNoteSnapshot(
+  accessToken: string,
+  remoteId: string,
+  cachedNote?: LocalNote,
+) {
   const message = await fetchRemoteNoteRecord(accessToken, remoteId)
   const bodyHtml = readString(message.body?.content)
   const sourceBodyHtml = readRemoteRichHtml(message) ?? bodyHtml
-  const attachments =
+  const needsAttachmentHydration =
     readBoolean(message.hasAttachments) ||
     messageNeedsAttachmentHydration(bodyHtml, sourceBodyHtml)
-    ? await fetchRemoteNoteAttachments(accessToken, remoteId, bodyHtml, sourceBodyHtml)
-    : []
+  const attachments = !needsAttachmentHydration
+    ? []
+    : canReuseRemoteAttachments(readString(message.changeKey), cachedNote)
+      ? cachedNote?.attachments ?? []
+      : await fetchRemoteNoteAttachments(
+          accessToken,
+          remoteId,
+          bodyHtml,
+          sourceBodyHtml,
+          cachedNote?.attachments,
+        )
 
   return buildRemoteNoteSnapshot(message, attachments)
 }
@@ -552,82 +613,166 @@ async function syncRemoteNoteAttachments(
   }
 }
 
-export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNote[] = []) {
+function remoteNoteNeedsDetails(message: RemoteMessageRecord) {
+  return Boolean(
+    !readString(message.id) ||
+      !Object.prototype.hasOwnProperty.call(message, 'subject') ||
+      typeof message.body?.content !== 'string' ||
+      typeof message.hasAttachments !== 'boolean' ||
+      !readString(message.changeKey) ||
+      !readString(message.createdDateTime) ||
+      !readString(message.lastModifiedDateTime),
+  )
+}
+
+async function hydrateDeltaNote(
+  accessToken: string,
+  deltaMessage: RemoteMessageRecord,
+  cachedNote: LocalNote | undefined,
+) {
+  const deltaMessageId = readString(deltaMessage.id)
+
+  if (!deltaMessageId) {
+    throw new Error('Delta 便签缺少远端标识')
+  }
+
+  const message = remoteNoteNeedsDetails(deltaMessage)
+    ? {
+        ...deltaMessage,
+        ...(await fetchRemoteNoteRecord(accessToken, deltaMessageId)),
+      }
+    : deltaMessage
+  const messageId = readString(message.id, deltaMessageId)
+  const remoteChangeKey = readString(message.changeKey)
+  const bodyHtml = readString(message.body?.content)
+  const richHtml = readRemoteRichHtml(message)
+  const needsAttachmentHydration =
+    readBoolean(message.hasAttachments) ||
+    messageNeedsAttachmentHydration(bodyHtml, richHtml)
+
+  const attachments = !needsAttachmentHydration
+    ? []
+    : canReuseRemoteAttachments(remoteChangeKey, cachedNote)
+      ? cachedNote?.attachments ?? []
+      : await fetchRemoteNoteAttachments(
+          accessToken,
+          messageId,
+          bodyHtml,
+          richHtml ?? bodyHtml,
+          cachedNote?.attachments,
+        )
+
+  return {
+    ...message,
+    quicknoteRichHtml: richHtml,
+    quicknoteColor: readRemoteNoteColor(message),
+    quicknoteAttachments: attachments,
+    quicknoteAttachmentsChangeKey: remoteChangeKey,
+  }
+}
+
+export async function fetchRemoteNotesDelta(
+  accessToken: string,
+  homeAccountId: string,
+  deltaLink: string | undefined,
+  cachedNotes: LocalNote[] = [],
+): Promise<RemoteNotesDeltaResult> {
+  const initial = !deltaLink
   const cachedNotesByRemoteId = new Map(
     cachedNotes
       .filter((note) => note.remoteId)
       .map((note) => [note.remoteId as string, note]),
   )
-  const messagesPath = await getNotesMessagesPath(accessToken)
-  const response = await graphFetch<{ value?: RemoteMessageRecord[] }>(
-    accessToken,
-    `${messagesPath}?${NOTES_MESSAGES_QUERY}`,
-    {
+  const messagesPath = initial
+    ? await getNotesMessagesPath(accessToken, homeAccountId)
+    : undefined
+  let pageLink = deltaLink ?? `${messagesPath}/delta?${NOTES_DELTA_QUERY}`
+  let nextDeltaLink = ''
+  const visitedLinks = new Set<string>()
+  const changes: Array<Record<string, unknown>> = []
+  const removedRemoteIds: string[] = []
+  const seenRemoteIds = new Set<string>()
+
+  while (pageLink) {
+    if (visitedLinks.has(pageLink)) {
+      throw new Error('Graph Delta 分页链接出现循环')
+    }
+
+    visitedLinks.add(pageLink)
+    const page = await graphFetch<{
+      value?: RemoteMessageRecord[]
+      '@odata.nextLink'?: string
+      '@odata.deltaLink'?: string
+    }>(accessToken, pageLink, {
       headers: {
         Prefer: 'outlook.body-content-type="html"',
       },
-    },
-  )
+    })
 
-  return Promise.all(
-    (response.value ?? []).map(async (message) => {
-      const messageId = readString(message.id)
-      const remoteChangeKey = readString(message.changeKey)
-      const cachedNote = cachedNotesByRemoteId.get(messageId)
-      const bodyHtml = readString(message.body?.content)
-      const richHtml = readRemoteRichHtml(message)
-      const color = readRemoteNoteColor(message)
-      const needsAttachmentHydration =
-        readBoolean(message.hasAttachments) ||
-        messageNeedsAttachmentHydration(bodyHtml, richHtml)
+    const hydratedPage = await Promise.all(
+      (page.value ?? []).map(async (message) => {
+        const remoteId = readString(message.id)
 
-      if (!messageId || !needsAttachmentHydration) {
-        return {
-          ...message,
-          quicknoteAttachments: [],
-          quicknoteAttachmentsChangeKey: remoteChangeKey,
-          quicknoteRichHtml: richHtml,
-          quicknoteColor: color,
+        if (message['@removed']) {
+          if (!remoteId) {
+            throw new Error('Delta 删除记录缺少远端标识')
+          }
+
+          removedRemoteIds.push(remoteId)
+          return null
         }
+
+        const hydrated = await hydrateDeltaNote(
+          accessToken,
+          message,
+          cachedNotesByRemoteId.get(remoteId),
+        )
+        const hydratedRemoteId = readString((hydrated as Record<string, unknown>).id)
+
+        if (hydratedRemoteId) {
+          seenRemoteIds.add(hydratedRemoteId)
+        }
+
+        return hydrated
+      }),
+    )
+
+    for (const note of hydratedPage) {
+      if (note) {
+        changes.push(note)
       }
+    }
 
-      if (canReuseRemoteAttachments(remoteChangeKey, cachedNote)) {
-        return {
-          ...message,
-          quicknoteRichHtml: richHtml,
-          quicknoteColor: color,
-          quicknoteAttachments: cachedNote?.attachments ?? [],
-          quicknoteAttachmentsChangeKey: remoteChangeKey,
-        }
-      }
+    const nextLink = readString(page['@odata.nextLink'])
 
-      try {
-        return {
-          ...message,
-          quicknoteRichHtml: richHtml,
-          quicknoteColor: color,
-          quicknoteAttachments: await fetchRemoteNoteAttachments(
-            accessToken,
-            messageId,
-            bodyHtml,
-            richHtml ?? bodyHtml,
-          ),
-          quicknoteAttachmentsChangeKey: remoteChangeKey,
-        }
-      } catch {
-        return {
-          ...message,
-          quicknoteRichHtml: richHtml,
-          quicknoteColor: color,
-          quicknoteAttachmentsError: true,
-        }
-      }
-    }),
-  )
+    if (nextLink) {
+      pageLink = nextLink
+      continue
+    }
+
+    nextDeltaLink = readString(page['@odata.deltaLink'])
+    pageLink = ''
+  }
+
+  if (!nextDeltaLink) {
+    throw new Error('Graph Delta 响应缺少同步游标')
+  }
+
+  return {
+    changes,
+    removedRemoteIds,
+    seenRemoteIds: [...seenRemoteIds],
+    deltaLink: nextDeltaLink,
+    initial,
+  }
 }
 
-export async function createRemoteNote(accessToken: string, note: LocalNote) {
-  const messagesPath = await getNotesMessagesPath(accessToken)
+export async function createRemoteNote(
+  accessToken: string,
+  note: LocalNote,
+  homeAccountId: string,
+) {
+  const messagesPath = await getNotesMessagesPath(accessToken, homeAccountId)
   const remoteBodyHtml = prepareRemoteNoteHtml(note.bodyHtml, note.attachments)
   const created = await graphFetch<Record<string, unknown>>(accessToken, messagesPath, {
     method: 'POST',
@@ -663,7 +808,7 @@ export async function createRemoteNote(accessToken: string, note: LocalNote) {
     throw new Error('远端便签创建失败')
   }
 
-  return fetchRemoteNoteSnapshot(accessToken, remoteId)
+  return fetchRemoteNoteSnapshot(accessToken, remoteId, note)
 }
 
 export async function updateRemoteNote(accessToken: string, note: LocalNote) {
@@ -671,7 +816,7 @@ export async function updateRemoteNote(accessToken: string, note: LocalNote) {
     throw new Error('缺少远端便签标识')
   }
 
-  const currentRemote = await fetchRemoteNoteSnapshot(accessToken, note.remoteId)
+  const currentRemote = await fetchRemoteNoteSnapshot(accessToken, note.remoteId, note)
   const currentRemoteCanonicalHtml = currentRemote.lastSyncedBodyHtml
   const localCanonicalHtml = note.bodyHtml
   const localColor = normalizeNoteColor(note.color)
@@ -739,7 +884,7 @@ export async function updateRemoteNote(accessToken: string, note: LocalNote) {
     prepareRemoteNoteHtml(targetCanonicalHtml, note.attachments),
   )
 
-  return fetchRemoteNoteSnapshot(accessToken, note.remoteId)
+  return fetchRemoteNoteSnapshot(accessToken, note.remoteId, note)
 }
 
 export async function deleteRemoteNote(accessToken: string, remoteId: string) {

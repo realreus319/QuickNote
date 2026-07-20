@@ -11,6 +11,10 @@ export async function setAppStateValue<T>(key: string, value: T) {
   await db.appState.put({ key, value })
 }
 
+export async function deleteAppStateValue(key: string) {
+  await db.appState.delete(key)
+}
+
 export async function getSyncStatus() {
   return getAppStateValue<AppSyncStatus>('syncStatus', 'unauthenticated')
 }

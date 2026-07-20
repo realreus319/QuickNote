@@ -1,5 +1,19 @@
 const GRAPH_BASE = 'https://graph.microsoft.com'
 
+export function resolveGraphRequestUrl(path: string) {
+  if (path.startsWith('/')) {
+    return `${GRAPH_BASE}${path}`
+  }
+
+  const url = new URL(path)
+
+  if (url.origin !== GRAPH_BASE) {
+    throw new Error('Graph 分页链接来源无效')
+  }
+
+  return url.toString()
+}
+
 export class GraphRequestError extends Error {
   status: number
   body: string
@@ -28,7 +42,7 @@ export async function graphFetchRaw(
   path: string,
   init?: RequestInit,
 ) {
-  const response = await fetch(`${GRAPH_BASE}${path}`, {
+  const response = await fetch(resolveGraphRequestUrl(path), {
     ...init,
     headers: createGraphHeaders(accessToken, init),
   })

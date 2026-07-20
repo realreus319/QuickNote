@@ -9,7 +9,7 @@ vi.mock('@/graph/graphClient', () => graphClientMocks)
 
 import {
   canReuseRemoteAttachments,
-  fetchRemoteNotes,
+  fetchRemoteNotesDelta,
   isRemoteImageAttachment,
   MICROSOFT_NOTE_COLOR_PROPERTY_ID,
   readRemoteNoteColor,
@@ -89,32 +89,41 @@ describe('notesApi', () => {
         return Promise.resolve({})
       }
 
-      if (path.includes('$select=id,subject,body')) {
+      if (path.includes('/messages/delta?')) {
         return Promise.resolve({
           value: [
             {
               id: 'remote-note-1',
               subject: 'Cached note',
               body: { content: '<p>Cached</p><img src="cid:quicknote-image-1">' },
+              createdDateTime: '2026-07-20T00:00:00.000Z',
+              lastModifiedDateTime: '2026-07-20T00:00:00.000Z',
               hasAttachments: true,
               changeKey: 'change-key-2',
             },
           ],
+          '@odata.deltaLink':
+            'https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=next',
         })
       }
 
       throw new Error(`Unexpected Graph request: ${path}`)
     })
 
-    const notes = await fetchRemoteNotes('access-token', [cachedNote])
+    const result = await fetchRemoteNotesDelta(
+      'access-token',
+      'cached-account',
+      undefined,
+      [cachedNote],
+    )
     const requestedPaths = graphClientMocks.graphFetch.mock.calls.map((call) => String(call[1]))
     const cachedAttachments =
-      notes[0] && 'quicknoteAttachments' in notes[0]
-        ? notes[0].quicknoteAttachments
+      result.changes[0] && 'quicknoteAttachments' in result.changes[0]
+        ? result.changes[0].quicknoteAttachments
         : undefined
 
     expect(cachedAttachments).toEqual([cachedAttachment])
-    expect(notes[0]?.quicknoteColor).toBe('yellow')
+    expect(result.changes[0]?.quicknoteColor).toBe('yellow')
     expect(requestedPaths.some((path) => path.includes('/attachments'))).toBe(false)
     expect(requestedPaths.some((path) => path.includes(encodeURIComponent(MICROSOFT_NOTE_COLOR_PROPERTY_ID)))).toBe(true)
     expect(graphClientMocks.graphFetchBlob).not.toHaveBeenCalled()

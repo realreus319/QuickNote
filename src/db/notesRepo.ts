@@ -116,81 +116,115 @@ export async function searchNotes(query: string) {
   })
 }
 
-export async function syncRemoteNotes(notes: Array<Record<string, unknown>>) {
-  const now = toIsoNow()
-  const currentByRemoteId = new Map(
-    (await db.notes.toArray())
-      .filter((note) => note.remoteId)
-      .map((note) => [note.remoteId as string, note]),
-  )
+function mapRemoteNote(
+  item: Record<string, unknown>,
+  existing: LocalNote | undefined,
+  now: string,
+): LocalNote {
+  const remoteId = readString(item.id)
 
-  const mapped: LocalNote[] = notes.map((item) => {
-    const remoteId = readString(item.id)
-    const existing = currentByRemoteId.get(remoteId)
-    const bodyRecord =
-      item.body && typeof item.body === 'object'
-        ? (item.body as { content?: string })
+  if (!remoteId) {
+    throw new Error('远端便签缺少标识')
+  }
+
+  const bodyRecord =
+    item.body && typeof item.body === 'object'
+      ? (item.body as { content?: string })
+      : undefined
+  const richHtml =
+    typeof item.quicknoteRichHtml === 'string'
+      ? item.quicknoteRichHtml
+      : bodyRecord?.content
+        ? String(bodyRecord.content)
         : undefined
-    const richHtml =
-      typeof item.quicknoteRichHtml === 'string'
-        ? item.quicknoteRichHtml
-        : bodyRecord?.content
-          ? String(bodyRecord.content)
-          : undefined
-    const remoteTitle = readString(item.subject)
-    const remoteAttachments = Array.isArray(item.quicknoteAttachments)
-      ? (item.quicknoteAttachments as LocalNoteAttachment[])
-      : existing?.attachments ?? []
-    const storedBodyHtml = richHtml
-      ? convertRemoteNoteHtmlToStoredHtml(richHtml, remoteAttachments)
-      : '<p></p>'
-    const rawContent = richHtml
-      ? derivePlainTextFromStoredHtml(storedBodyHtml)
-      : readString(item.content ?? item.bodyPreview ?? item.displayName)
-    const parsed = remoteTitle
-      ? {
-          title: remoteTitle,
-          content: rawContent.replace(/\r\n/g, '\n').trim(),
-        }
-      : splitRemoteNoteContent(rawContent)
-    const shouldPreserveExistingAttachments = Boolean(item.quicknoteAttachmentsError)
-    const remoteColor = normalizeNoteColor(item.quicknoteColor)
+  const remoteTitle = readString(item.subject)
+  const remoteAttachments = Array.isArray(item.quicknoteAttachments)
+    ? (item.quicknoteAttachments as LocalNoteAttachment[])
+    : existing?.attachments ?? []
+  const storedBodyHtml = richHtml
+    ? convertRemoteNoteHtmlToStoredHtml(richHtml, remoteAttachments)
+    : '<p></p>'
+  const rawContent = richHtml
+    ? derivePlainTextFromStoredHtml(storedBodyHtml)
+    : readString(item.content ?? item.bodyPreview ?? item.displayName)
+  const parsed = remoteTitle
+    ? {
+        title: remoteTitle,
+        content: rawContent.replace(/\r\n/g, '\n').trim(),
+      }
+    : splitRemoteNoteContent(rawContent)
+  const remoteColor = normalizeNoteColor(item.quicknoteColor)
 
-    return {
-      id: existing?.id ?? generateLocalId('note'),
-      remoteId,
-      title: parsed.title,
-      content: parsed.content,
-      bodyHtml: storedBodyHtml,
-      attachments: shouldPreserveExistingAttachments
-        ? existing?.attachments ?? []
-        : remoteAttachments,
-      color: remoteColor,
-      pinned: existing?.pinned ?? false,
-      source: 'microsoft-notes',
-      createdAt: readString(item.createdDateTime, existing?.createdAt ?? now),
-      updatedAt: readString(item.lastModifiedDateTime, existing?.updatedAt ?? now),
-      lastSyncedAt: now,
-      lastSyncedTitle: remoteTitle,
-      lastSyncedBodyHtml: richHtml ?? '<p></p>',
-      lastSyncedColor: remoteColor,
-      remoteChangeKey: readString(item.changeKey, existing?.remoteChangeKey ?? ''),
-      remoteAttachmentsChangeKey: readString(
-        item.quicknoteAttachmentsChangeKey,
-        existing?.remoteAttachmentsChangeKey ?? '',
-      ),
-      syncStatus: 'synced',
-      deleted: false,
+  return {
+    id: existing?.id ?? generateLocalId('note'),
+    remoteId,
+    title: parsed.title,
+    content: parsed.content,
+    bodyHtml: storedBodyHtml,
+    attachments: remoteAttachments,
+    color: remoteColor,
+    pinned: existing?.pinned ?? false,
+    source: 'microsoft-notes',
+    createdAt: readString(item.createdDateTime, existing?.createdAt ?? now),
+    updatedAt: readString(item.lastModifiedDateTime, existing?.updatedAt ?? now),
+    lastSyncedAt: now,
+    lastSyncedTitle: remoteTitle,
+    lastSyncedBodyHtml: richHtml ?? '<p></p>',
+    lastSyncedColor: remoteColor,
+    remoteChangeKey: readString(item.changeKey, existing?.remoteChangeKey ?? ''),
+    remoteAttachmentsChangeKey: readString(
+      item.quicknoteAttachmentsChangeKey,
+      existing?.remoteAttachmentsChangeKey ?? '',
+    ),
+    syncStatus: 'synced',
+    deleted: false,
+  }
+}
+
+export async function applyRemoteNotesDelta(
+  changes: Array<Record<string, unknown>>,
+  removedRemoteIds: string[],
+  fullSnapshotRemoteIds?: string[],
+) {
+  await db.transaction('rw', db.notes, async () => {
+    const currentNotes = await db.notes.toArray()
+    const currentByRemoteId = new Map(
+      currentNotes
+        .filter((note) => note.remoteId)
+        .map((note) => [note.remoteId as string, note]),
+    )
+    const now = toIsoNow()
+    const removed = new Set(removedRemoteIds)
+    const mappedByRemoteId = new Map<string, LocalNote>()
+
+    for (const item of changes) {
+      const remoteId = readString(item.id)
+
+      if (removed.has(remoteId)) {
+        continue
+      }
+
+      const mapped = mapRemoteNote(item, currentByRemoteId.get(remoteId), now)
+      mappedByRemoteId.set(remoteId, mapped)
+    }
+
+    const fullSnapshot = fullSnapshotRemoteIds ? new Set(fullSnapshotRemoteIds) : undefined
+    const localIdsToDelete = currentNotes
+      .filter(
+        (note) =>
+          note.remoteId &&
+          (removed.has(note.remoteId) || (fullSnapshot && !fullSnapshot.has(note.remoteId))),
+      )
+      .map((note) => note.id)
+
+    if (localIdsToDelete.length) {
+      await db.notes.bulkDelete(localIdsToDelete)
+    }
+
+    if (mappedByRemoteId.size) {
+      await db.notes.bulkPut([...mappedByRemoteId.values()])
     }
   })
-
-  const remoteIds = new Set(mapped.map((note) => note.remoteId).filter(Boolean))
-  const survivingLocals = (await db.notes.toArray()).filter(
-    (note) => !note.remoteId || remoteIds.has(note.remoteId),
-  )
-
-  await db.notes.clear()
-  await db.notes.bulkPut([...survivingLocals.filter((note) => !note.remoteId), ...mapped])
 }
 
 export async function applySyncedNote(noteId: string, remoteId: string) {

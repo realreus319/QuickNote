@@ -6,11 +6,12 @@ import { syncAll } from '@/sync/syncManager'
 import { useNetworkStatus } from '@/sync/network'
 
 export function useSyncMutation() {
-  const { getAccessToken, isAuthenticated } = useAuth()
+  const { account, getAccessToken, isAuthenticated } = useAuth()
 
   return useMutation({
     mutationKey: ['sync'],
-    mutationFn: () => syncAll(() => getAccessToken(), isAuthenticated),
+    mutationFn: () =>
+      syncAll(() => getAccessToken(), isAuthenticated, account?.homeAccountId ?? ''),
   })
 }
 
