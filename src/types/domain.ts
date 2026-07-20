@@ -25,6 +25,7 @@ export interface LocalNote {
   lastSyncedTitle?: string
   lastSyncedBodyHtml?: string
   remoteChangeKey?: string
+  remoteAttachmentsChangeKey?: string
   syncStatus: NoteSyncStatus
   deleted?: boolean
 }

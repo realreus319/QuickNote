@@ -170,6 +170,10 @@ export async function syncRemoteNotes(notes: Array<Record<string, unknown>>) {
       lastSyncedTitle: remoteTitle,
       lastSyncedBodyHtml: richHtml ?? '<p></p>',
       remoteChangeKey: readString(item.changeKey, existing?.remoteChangeKey ?? ''),
+      remoteAttachmentsChangeKey: readString(
+        item.quicknoteAttachmentsChangeKey,
+        existing?.remoteAttachmentsChangeKey ?? '',
+      ),
       syncStatus: 'synced',
       deleted: false,
     }
@@ -231,6 +235,7 @@ export async function applyRemoteNoteSnapshot(
     lastSyncedTitle: snapshot.title,
     lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
     remoteChangeKey: snapshot.remoteChangeKey,
+    remoteAttachmentsChangeKey: snapshot.remoteChangeKey,
   })
 }
 

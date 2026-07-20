@@ -62,7 +62,8 @@ export async function replayNoteOperation(accessToken: string, operation: Pendin
 }
 
 export async function pullNotes(accessToken: string) {
-  const notes = await fetchRemoteNotes(accessToken)
+  const cachedNotes = await listNotes()
+  const notes = await fetchRemoteNotes(accessToken, cachedNotes)
   await syncRemoteNotes(notes)
   return listNotes()
 }

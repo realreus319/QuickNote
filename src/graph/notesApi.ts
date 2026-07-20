@@ -264,6 +264,15 @@ export function isRemoteImageAttachment(attachment: RemoteAttachmentRecord) {
   return contentType.startsWith('image/')
 }
 
+export function canReuseRemoteAttachments(
+  remoteChangeKey: string,
+  cachedNote: LocalNote | undefined,
+) {
+  return Boolean(
+    remoteChangeKey && cachedNote?.remoteAttachmentsChangeKey === remoteChangeKey,
+  )
+}
+
 function mapRemoteAttachment(
   attachment: RemoteAttachmentRecord,
   contentBytes: string,
@@ -513,7 +522,12 @@ async function syncRemoteNoteAttachments(
   }
 }
 
-export async function fetchRemoteNotes(accessToken: string) {
+export async function fetchRemoteNotes(accessToken: string, cachedNotes: LocalNote[] = []) {
+  const cachedNotesByRemoteId = new Map(
+    cachedNotes
+      .filter((note) => note.remoteId)
+      .map((note) => [note.remoteId as string, note]),
+  )
   const messagesPath = await getNotesMessagesPath(accessToken)
   const response = await graphFetch<{ value?: RemoteMessageRecord[] }>(
     accessToken,
@@ -528,14 +542,29 @@ export async function fetchRemoteNotes(accessToken: string) {
   return Promise.all(
     (response.value ?? []).map(async (message) => {
       const messageId = readString(message.id)
+      const remoteChangeKey = readString(message.changeKey)
+      const cachedNote = cachedNotesByRemoteId.get(messageId)
       const bodyHtml = readString(message.body?.content)
       const richHtml = readRemoteRichHtml(message)
+      const needsAttachmentHydration =
+        readBoolean(message.hasAttachments) ||
+        messageNeedsAttachmentHydration(bodyHtml, richHtml)
 
-      if (!messageId || (!readBoolean(message.hasAttachments) && !messageNeedsAttachmentHydration(bodyHtml, richHtml))) {
+      if (!messageId || !needsAttachmentHydration) {
         return {
           ...message,
           quicknoteAttachments: [],
+          quicknoteAttachmentsChangeKey: remoteChangeKey,
           quicknoteRichHtml: richHtml,
+        }
+      }
+
+      if (canReuseRemoteAttachments(remoteChangeKey, cachedNote)) {
+        return {
+          ...message,
+          quicknoteRichHtml: richHtml,
+          quicknoteAttachments: cachedNote?.attachments ?? [],
+          quicknoteAttachmentsChangeKey: remoteChangeKey,
         }
       }
 
@@ -549,6 +578,7 @@ export async function fetchRemoteNotes(accessToken: string) {
             bodyHtml,
             richHtml ?? bodyHtml,
           ),
+          quicknoteAttachmentsChangeKey: remoteChangeKey,
         }
       } catch {
         return {
