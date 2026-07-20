@@ -3,9 +3,14 @@ import { NoteCard } from '@/components/notes/NoteCard'
 
 export function NoteMasonry({ notes }: { notes: LocalNote[] }) {
   return (
-    <div className="grid min-w-0 max-w-full grid-cols-2 items-start gap-2.5 sm:gap-3 xl:grid-cols-3">
+    <div className="min-w-0 max-w-full columns-2 gap-2.5 sm:gap-3 xl:columns-3">
       {notes.map((note) => (
-        <NoteCard key={note.id} note={note} />
+        <div
+          key={note.id}
+          className="mb-2.5 inline-block w-full break-inside-avoid align-top sm:mb-3"
+        >
+          <NoteCard note={note} />
+        </div>
       ))}
     </div>
   )
