@@ -26,6 +26,7 @@ function makeMessage(id: string, overrides: Record<string, unknown> = {}) {
     lastModifiedDateTime: '2026-07-20T00:00:00.000Z',
     hasAttachments: false,
     changeKey: `change-${id}`,
+    singleValueExtendedProperties: [],
     ...overrides,
   }
 }
@@ -70,6 +71,8 @@ describe('fetchRemoteNotesDelta', () => {
     expect(result.seenRemoteIds).toHaveLength(101)
     expect(result.deltaLink).toBe(deltaLink)
     expect(graphClientMocks.graphFetch).toHaveBeenCalledTimes(3)
+    const initialDeltaPath = String(graphClientMocks.graphFetch.mock.calls[1]?.[1])
+    expect(initialDeltaPath).not.toContain('$expand=')
   })
 
   it('uses one empty delta request when nothing changed', async () => {
@@ -131,14 +134,19 @@ describe('fetchRemoteNotesDelta', () => {
     expect(folderProbes).toHaveLength(2)
   })
 
-  it('fetches a single detail record only when a delta item is incomplete', async () => {
+  it('fetches one detail record when delta omits legacy extended properties', async () => {
     const savedDeltaLink =
       'https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=partial'
 
     graphClientMocks.graphFetch.mockImplementation((_accessToken, path: string) => {
       if (path === savedDeltaLink) {
         return Promise.resolve({
-          value: [{ id: 'partial-note', subject: 'Partial' }],
+          value: [
+            makeMessage('partial-note', {
+              subject: 'Partial',
+              singleValueExtendedProperties: undefined,
+            }),
+          ],
           '@odata.deltaLink':
             'https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=complete',
         })
@@ -159,6 +167,9 @@ describe('fetchRemoteNotesDelta', () => {
 
     expect(result.changes[0]?.subject).toBe('Complete')
     expect(graphClientMocks.graphFetch).toHaveBeenCalledTimes(2)
+    expect(String(graphClientMocks.graphFetch.mock.calls[1]?.[1])).toContain(
+      '$expand=singleValueExtendedProperties',
+    )
   })
 
   it('returns updates and removals from an incremental page', async () => {
@@ -234,7 +245,6 @@ describe('fetchRemoteNotesDelta', () => {
               name: 'image.png',
               contentType: 'image/png',
               size: 3,
-              contentId: 'quicknote-image-1',
               isInline: true,
             },
           ],
@@ -264,6 +274,9 @@ describe('fetchRemoteNotesDelta', () => {
         (path) => path.includes('/attachments/') || path.endsWith('/$value'),
       ),
     ).toBe(false)
+    expect(requestedPaths.find((path) => path.includes('/attachments?$select='))).not.toContain(
+      'contentId',
+    )
     expect(graphClientMocks.graphFetchBlob).not.toHaveBeenCalled()
   })
 
@@ -375,7 +388,6 @@ describe('fetchRemoteNotesDelta', () => {
                 name: 'image.png',
                 contentType: 'image/png',
                 size: 3,
-                contentId: 'quicknote-image-1',
                 isInline: true,
               },
             ],

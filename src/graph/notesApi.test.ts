@@ -107,6 +107,19 @@ describe('notesApi', () => {
         })
       }
 
+      if (path.includes('/me/messages/remote-note-1?')) {
+        return Promise.resolve({
+          id: 'remote-note-1',
+          subject: 'Cached note',
+          body: { content: '<p>Cached</p><img src="cid:quicknote-image-1">' },
+          createdDateTime: '2026-07-20T00:00:00.000Z',
+          lastModifiedDateTime: '2026-07-20T00:00:00.000Z',
+          hasAttachments: true,
+          changeKey: 'change-key-2',
+          singleValueExtendedProperties: [],
+        })
+      }
+
       throw new Error(`Unexpected Graph request: ${path}`)
     })
 

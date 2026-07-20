@@ -69,7 +69,7 @@ interface RemoteAttachmentRecord extends Record<string, unknown> {
 }
 
 const NOTES_DELTA_QUERY =
-  `$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})&$top=100`
+  '$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$top=100'
 const SINGLE_NOTE_QUERY =
   `$select=id,subject,body,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})`
 const ATTACHMENT_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024
@@ -345,22 +345,27 @@ function mapRemoteAttachment(
 async function listRemoteAttachmentRefs(accessToken: string, messageId: string) {
   return graphFetch<{ value?: RemoteAttachmentRecord[] }>(
     accessToken,
-    `/v1.0/me/messages/${encodePathSegment(messageId)}/attachments?$select=id,name,contentType,size,contentId,isInline`,
+    `/v1.0/me/messages/${encodePathSegment(messageId)}/attachments?$select=id,name,contentType,size,isInline`,
   )
 }
 
 export function canReuseRemoteAttachment(
   attachment: RemoteAttachmentRecord,
   cachedAttachment: LocalNoteAttachment | undefined,
+  referencedContentIds: Set<string> = new Set(),
 ) {
   const remoteId = readString(attachment.id)
   const contentId = normalizeNoteContentId(readString(attachment.contentId))
+  const cachedContentId = normalizeNoteContentId(cachedAttachment?.contentId ?? '')
   const mimeType = readString(attachment.contentType).toLowerCase()
+  const contentIdMatches = contentId
+    ? cachedContentId === contentId
+    : referencedContentIds.has(cachedContentId)
 
   return Boolean(
     remoteId &&
       cachedAttachment?.remoteId === remoteId &&
-      normalizeNoteContentId(cachedAttachment.contentId) === contentId &&
+      contentIdMatches &&
       cachedAttachment.size === readNumber(attachment.size, -1) &&
       cachedAttachment.mimeType.toLowerCase() === mimeType &&
       cachedAttachment.base64,
@@ -400,6 +405,10 @@ async function fetchRemoteNoteAttachments(
 ) {
   const attachments = await listRemoteAttachmentRefs(accessToken, messageId)
   const imageRefs = (attachments.value ?? []).filter(isRemoteImageAttachment)
+  const referencedContentIds = new Set([
+    ...collectRemoteContentIdsFromHtml(bodyHtml ?? ''),
+    ...collectRemoteContentIdsFromHtml(sourceHtml ?? ''),
+  ])
   const cachedByRemoteId = new Map(
     cachedAttachments
       .filter((attachment) => attachment.remoteId)
@@ -416,7 +425,10 @@ async function fetchRemoteNoteAttachments(
 
       const cachedAttachment = cachedByRemoteId.get(attachmentId)
 
-      if (cachedAttachment && canReuseRemoteAttachment(attachment, cachedAttachment)) {
+      if (
+        cachedAttachment &&
+        canReuseRemoteAttachment(attachment, cachedAttachment, referencedContentIds)
+      ) {
         return {
           ...cachedAttachment,
           name: readString(attachment.name, cachedAttachment.name),
@@ -613,7 +625,10 @@ async function syncRemoteNoteAttachments(
   }
 }
 
-function remoteNoteNeedsDetails(message: RemoteMessageRecord) {
+function remoteNoteNeedsDetails(
+  message: RemoteMessageRecord,
+  requireExtendedProperties = false,
+) {
   return Boolean(
     !readString(message.id) ||
       !Object.prototype.hasOwnProperty.call(message, 'subject') ||
@@ -621,7 +636,8 @@ function remoteNoteNeedsDetails(message: RemoteMessageRecord) {
       typeof message.hasAttachments !== 'boolean' ||
       !readString(message.changeKey) ||
       !readString(message.createdDateTime) ||
-      !readString(message.lastModifiedDateTime),
+      !readString(message.lastModifiedDateTime) ||
+      (requireExtendedProperties && !Array.isArray(message.singleValueExtendedProperties)),
   )
 }
 
@@ -636,7 +652,9 @@ async function hydrateDeltaNote(
     throw new Error('Delta 便签缺少远端标识')
   }
 
-  const message = remoteNoteNeedsDetails(deltaMessage)
+  // Graph message delta rejects legacy extended-property expansion for some mailboxes,
+  // so changed items are supplemented with one regular message request when needed.
+  const message = remoteNoteNeedsDetails(deltaMessage, true)
     ? {
         ...deltaMessage,
         ...(await fetchRemoteNoteRecord(accessToken, deltaMessageId)),
