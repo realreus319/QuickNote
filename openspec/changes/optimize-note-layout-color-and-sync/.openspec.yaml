@@ -1,0 +1,20 @@
+change: optimize-note-layout-color-and-sync
+title: Optimize note layout, Microsoft colors, attachment reuse, and delta sync
+status: proposed
+created: 2026-07-21
+owner: codex
+depends_on:
+  - build-quicknote-pwa
+  - add-note-image-attachments
+  - refine-note-detail-html-editor
+  - replace-note-editor-with-tiptap
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  tasks: tasks.md
+  specs_dir: specs
+review_mode: local-manual
+notes:
+  - The implementation landed before this retrospective OpenSpec package and is recorded by completed tasks and verification evidence.
+  - Microsoft modern Sticky Notes facet metadata is authoritative for the seven-color model; the five-value PidLidNoteColor property remains a classic Outlook compatibility fallback.
+  - OpenSpec CLI is unavailable in this environment, so artifact validation is recorded in review-log.md.
