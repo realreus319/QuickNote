@@ -55,10 +55,10 @@ describe('pullNotes delta state', () => {
 
     await pullNotes('token', 'account-a')
 
-    expect(getNotesDeltaStateKey('account-a')).toBe('notesDeltaLink:v2:account-a')
-    expect(getNotesDeltaStateKey('account-b')).toBe('notesDeltaLink:v2:account-b')
+    expect(getNotesDeltaStateKey('account-a')).toBe('notesDeltaLink:v3:account-a')
+    expect(getNotesDeltaStateKey('account-b')).toBe('notesDeltaLink:v3:account-b')
     expect(appStateMocks.getAppStateValue).toHaveBeenCalledWith(
-      'notesDeltaLink:v2:account-a',
+      'notesDeltaLink:v3:account-a',
       '',
     )
     expect(notesApiMocks.fetchRemoteNotesDelta).toHaveBeenCalledWith(
@@ -68,7 +68,7 @@ describe('pullNotes delta state', () => {
       [],
     )
     expect(appStateMocks.setAppStateValue).toHaveBeenCalledWith(
-      'notesDeltaLink:v2:account-a',
+      'notesDeltaLink:v3:account-a',
       result.deltaLink,
     )
   })
@@ -132,7 +132,7 @@ describe('pullNotes delta state', () => {
     await pullNotes('token', 'account-expired')
 
     expect(appStateMocks.deleteAppStateValue).toHaveBeenCalledWith(
-      'notesDeltaLink:v2:account-expired',
+      'notesDeltaLink:v3:account-expired',
     )
     expect(notesApiMocks.fetchRemoteNotesDelta).toHaveBeenNthCalledWith(
       2,
@@ -147,7 +147,7 @@ describe('pullNotes delta state', () => {
       rebuilt.seenRemoteIds,
     )
     expect(appStateMocks.setAppStateValue).toHaveBeenCalledWith(
-      'notesDeltaLink:v2:account-expired',
+      'notesDeltaLink:v3:account-expired',
       rebuilt.deltaLink,
     )
   })

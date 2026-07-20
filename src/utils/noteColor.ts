@@ -7,30 +7,42 @@ export const NOTE_COLOR_OPTIONS: ReadonlyArray<{
   label: string
 }> = [
   { value: 'yellow', label: '黄色' },
-  { value: 'blue', label: '蓝色' },
   { value: 'green', label: '绿色' },
   { value: 'pink', label: '粉色' },
+  { value: 'purple', label: '紫色' },
+  { value: 'blue', label: '蓝色' },
   { value: 'white', label: '白色' },
+  { value: 'charcoal', label: '炭黑' },
 ]
 
+// PidLidNoteColor only defines five values. Modern facet metadata remains the
+// authoritative, lossless value; these two fallbacks keep classic Outlook usable.
 const microsoftValueByColor: Record<NoteColor, string> = {
   blue: '0',
   green: '1',
   pink: '2',
+  purple: '2',
   yellow: '3',
   white: '4',
+  charcoal: '4',
 }
 
-const colorByMicrosoftValue = new Map(
-  Object.entries(microsoftValueByColor).map(([color, value]) => [value, color as NoteColor]),
-)
+const colorByMicrosoftValue = new Map<string, NoteColor>([
+  ['0', 'blue'],
+  ['1', 'green'],
+  ['2', 'pink'],
+  ['3', 'yellow'],
+  ['4', 'white'],
+])
 
 const microsoftFacetValueByColor: Record<NoteColor, number> = {
   white: 0,
   yellow: 1,
   green: 2,
   pink: 3,
+  purple: 4,
   blue: 5,
+  charcoal: 6,
 }
 
 const colorByMicrosoftFacetValue = new Map<number, NoteColor>([
@@ -38,11 +50,9 @@ const colorByMicrosoftFacetValue = new Map<number, NoteColor>([
   [1, 'yellow'],
   [2, 'green'],
   [3, 'pink'],
-  // Modern Sticky Notes also exposes purple and charcoal. The product's
-  // intentionally limited five-color palette uses the nearest supported paper.
-  [4, 'pink'],
+  [4, 'purple'],
   [5, 'blue'],
-  [6, 'white'],
+  [6, 'charcoal'],
 ])
 
 export function isNoteColor(value: unknown): value is NoteColor {

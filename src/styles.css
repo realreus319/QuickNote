@@ -73,6 +73,7 @@
 
 [data-note-color='yellow'] {
   --note-paper: oklch(0.965 0.035 88);
+  --note-picker: oklch(0.91 0.13 94);
   --note-accent: oklch(0.72 0.105 84);
   --note-ink: oklch(0.27 0.045 78);
   --note-muted: oklch(0.45 0.036 78);
@@ -81,6 +82,7 @@
 
 [data-note-color='blue'] {
   --note-paper: oklch(0.958 0.025 232);
+  --note-picker: oklch(0.84 0.11 232);
   --note-accent: oklch(0.63 0.075 232);
   --note-ink: oklch(0.27 0.035 232);
   --note-muted: oklch(0.45 0.034 232);
@@ -89,6 +91,7 @@
 
 [data-note-color='green'] {
   --note-paper: oklch(0.958 0.026 145);
+  --note-picker: oklch(0.87 0.12 145);
   --note-accent: oklch(0.62 0.075 145);
   --note-ink: oklch(0.26 0.035 145);
   --note-muted: oklch(0.44 0.034 145);
@@ -97,18 +100,38 @@
 
 [data-note-color='pink'] {
   --note-paper: oklch(0.962 0.027 8);
+  --note-picker: oklch(0.83 0.13 350);
   --note-accent: oklch(0.67 0.08 8);
   --note-ink: oklch(0.28 0.038 8);
   --note-muted: oklch(0.46 0.034 8);
   --note-placeholder: oklch(0.66 0.032 8);
 }
 
+[data-note-color='purple'] {
+  --note-paper: oklch(0.958 0.035 305);
+  --note-picker: oklch(0.78 0.13 305);
+  --note-accent: oklch(0.64 0.09 305);
+  --note-ink: oklch(0.27 0.04 305);
+  --note-muted: oklch(0.45 0.038 305);
+  --note-placeholder: oklch(0.65 0.035 305);
+}
+
 [data-note-color='white'] {
   --note-paper: oklch(0.985 0.006 85);
+  --note-picker: oklch(0.92 0.008 255);
   --note-accent: oklch(0.68 0.012 85);
   --note-ink: oklch(0.24 0.008 85);
   --note-muted: oklch(0.46 0.01 85);
   --note-placeholder: oklch(0.66 0.009 85);
+}
+
+[data-note-color='charcoal'] {
+  --note-paper: oklch(0.34 0.012 255);
+  --note-picker: oklch(0.49 0.01 255);
+  --note-accent: oklch(0.76 0.035 232);
+  --note-ink: oklch(0.96 0.008 85);
+  --note-muted: oklch(0.79 0.012 245);
+  --note-placeholder: oklch(0.64 0.014 245);
 }
 
 .note-paper,
@@ -150,7 +173,7 @@
 .note-color-swatch,
 .note-color-indicator {
   border-color: var(--note-line);
-  background: var(--note-paper);
+  background: var(--note-picker, var(--note-paper));
 }
 
 * {

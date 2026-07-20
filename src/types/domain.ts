@@ -1,7 +1,14 @@
 export type EntityType = 'note' | 'todo'
 export type PendingOperationType = 'create' | 'update' | 'delete'
 export type NoteSource = 'microsoft-notes' | 'local'
-export type NoteColor = 'blue' | 'green' | 'pink' | 'yellow' | 'white'
+export type NoteColor =
+  | 'white'
+  | 'yellow'
+  | 'green'
+  | 'pink'
+  | 'purple'
+  | 'blue'
+  | 'charcoal'
 export type NoteSyncStatus = 'synced' | 'pending' | 'conflict' | 'error'
 export type TodoSyncStatus = 'synced' | 'pending' | 'error'
 export type AppSyncStatus =

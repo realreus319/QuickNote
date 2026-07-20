@@ -73,6 +73,24 @@ describe('notesApi', () => {
     ).toBe('blue')
   })
 
+  it('preserves modern purple and charcoal colors', () => {
+    for (const [remoteColor, localColor] of [
+      [4, 'purple'],
+      [6, 'charcoal'],
+    ] as const) {
+      expect(
+        readRemoteNoteColor({
+          singleValueExtendedProperties: [
+            {
+              id: MICROSOFT_NOTE_FACET_PROPERTY_ID,
+              value: JSON.stringify({ color: remoteColor }),
+            },
+          ],
+        }),
+      ).toBe(localColor)
+    }
+  })
+
   it('falls back to the classic color when the modern facet is malformed', () => {
     expect(
       readRemoteNoteColor({

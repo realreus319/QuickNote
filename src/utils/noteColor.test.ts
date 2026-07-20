@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_NOTE_COLOR,
   migrateNoteColorState,
+  NOTE_COLOR_OPTIONS,
   normalizeNoteColor,
   noteColorFromMicrosoftFacetValue,
   noteColorFromMicrosoftValue,
@@ -12,6 +13,18 @@ import {
 } from '@/utils/noteColor'
 
 describe('note colors', () => {
+  it('offers the seven modern Microsoft Sticky Notes colors in picker order', () => {
+    expect(NOTE_COLOR_OPTIONS.map((option) => option.value)).toEqual([
+      'yellow',
+      'green',
+      'pink',
+      'purple',
+      'blue',
+      'white',
+      'charcoal',
+    ])
+  })
+
   it('maps the five Microsoft Sticky Note color values in both directions', () => {
     const mappings = [
       ['blue', '0'],
@@ -29,18 +42,18 @@ describe('note colors', () => {
 
   it('uses yellow for missing or unsupported values', () => {
     expect(normalizeNoteColor(undefined)).toBe(DEFAULT_NOTE_COLOR)
-    expect(normalizeNoteColor('purple')).toBe(DEFAULT_NOTE_COLOR)
+    expect(normalizeNoteColor('orange')).toBe(DEFAULT_NOTE_COLOR)
     expect(noteColorFromMicrosoftValue('99')).toBe(DEFAULT_NOTE_COLOR)
   })
 
-  it('maps modern Sticky Notes facet colors onto the five-color paper palette', () => {
+  it('maps all seven modern Sticky Notes facet colors without approximation', () => {
     expect(noteColorFromMicrosoftFacetValue(0)).toBe('white')
     expect(noteColorFromMicrosoftFacetValue(1)).toBe('yellow')
     expect(noteColorFromMicrosoftFacetValue(2)).toBe('green')
     expect(noteColorFromMicrosoftFacetValue(3)).toBe('pink')
-    expect(noteColorFromMicrosoftFacetValue(4)).toBe('pink')
+    expect(noteColorFromMicrosoftFacetValue(4)).toBe('purple')
     expect(noteColorFromMicrosoftFacetValue(5)).toBe('blue')
-    expect(noteColorFromMicrosoftFacetValue(6)).toBe('white')
+    expect(noteColorFromMicrosoftFacetValue(6)).toBe('charcoal')
     expect(noteColorFromMicrosoftFacetValue(99)).toBeUndefined()
     expect(noteColorFromMicrosoftFacetValue('invalid')).toBeUndefined()
 
@@ -48,7 +61,9 @@ describe('note colors', () => {
     expect(noteColorToMicrosoftFacetValue('yellow')).toBe(1)
     expect(noteColorToMicrosoftFacetValue('green')).toBe(2)
     expect(noteColorToMicrosoftFacetValue('pink')).toBe(3)
+    expect(noteColorToMicrosoftFacetValue('purple')).toBe(4)
     expect(noteColorToMicrosoftFacetValue('blue')).toBe(5)
+    expect(noteColorToMicrosoftFacetValue('charcoal')).toBe(6)
   })
 
   it('migrates legacy remote notes to a safe yellow sync baseline', () => {
