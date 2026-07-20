@@ -12,6 +12,7 @@ import {
   fetchRemoteNotesDelta,
   isRemoteImageAttachment,
   MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+  MICROSOFT_NOTE_FACET_PROPERTY_ID,
   readRemoteNoteColor,
 } from '@/graph/notesApi'
 import type { LocalNote } from '@/types/domain'
@@ -48,6 +49,40 @@ describe('notesApi', () => {
         singleValueExtendedProperties: [
           {
             id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+            value: '1',
+          },
+        ],
+      }),
+    ).toBe('green')
+  })
+
+  it('prefers the modern Sticky Notes facet and matches Graph property ids case-insensitively', () => {
+    expect(
+      readRemoteNoteColor({
+        singleValueExtendedProperties: [
+          {
+            id: MICROSOFT_NOTE_FACET_PROPERTY_ID.toLowerCase(),
+            value: JSON.stringify({ color: 5 }),
+          },
+          {
+            id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+            value: '3',
+          },
+        ],
+      }),
+    ).toBe('blue')
+  })
+
+  it('falls back to the classic color when the modern facet is malformed', () => {
+    expect(
+      readRemoteNoteColor({
+        singleValueExtendedProperties: [
+          {
+            id: MICROSOFT_NOTE_FACET_PROPERTY_ID,
+            value: '{not-json',
+          },
+          {
+            id: MICROSOFT_NOTE_COLOR_PROPERTY_ID.toLowerCase(),
             value: '1',
           },
         ],
@@ -138,6 +173,11 @@ describe('notesApi', () => {
     expect(cachedAttachments).toEqual([cachedAttachment])
     expect(result.changes[0]?.quicknoteColor).toBe('yellow')
     expect(requestedPaths.some((path) => path.includes('/attachments'))).toBe(false)
+    expect(
+      requestedPaths.some((path) =>
+        path.includes(encodeURIComponent(MICROSOFT_NOTE_FACET_PROPERTY_ID)),
+      ),
+    ).toBe(true)
     expect(requestedPaths.some((path) => path.includes(encodeURIComponent(MICROSOFT_NOTE_COLOR_PROPERTY_ID)))).toBe(true)
     expect(graphClientMocks.graphFetchBlob).not.toHaveBeenCalled()
   })

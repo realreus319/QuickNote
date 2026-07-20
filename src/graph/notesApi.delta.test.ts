@@ -12,6 +12,7 @@ vi.mock('@/graph/graphClient', () => graphClientMocks)
 import {
   fetchRemoteNotesDelta,
   MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+  MICROSOFT_NOTE_FACET_PROPERTY_ID,
   updateRemoteNote,
 } from '@/graph/notesApi'
 import type { LocalNote } from '@/types/domain'
@@ -134,7 +135,7 @@ describe('fetchRemoteNotesDelta', () => {
     expect(folderProbes).toHaveLength(2)
   })
 
-  it('fetches one detail record when delta omits legacy extended properties', async () => {
+  it('fetches separate detail records when delta omits extended properties', async () => {
     const savedDeltaLink =
       'https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=partial'
 
@@ -166,7 +167,7 @@ describe('fetchRemoteNotesDelta', () => {
     )
 
     expect(result.changes[0]?.subject).toBe('Complete')
-    expect(graphClientMocks.graphFetch).toHaveBeenCalledTimes(2)
+    expect(graphClientMocks.graphFetch).toHaveBeenCalledTimes(4)
     expect(String(graphClientMocks.graphFetch.mock.calls[1]?.[1])).toContain(
       '$expand=singleValueExtendedProperties',
     )
@@ -364,7 +365,15 @@ describe('fetchRemoteNotesDelta', () => {
                 { id: richHtmlPropertyId, value: storedHtml },
                 {
                   id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
-                  value: detailRequestCount === 1 ? '3' : '0',
+                  value: detailRequestCount <= 2 ? '3' : '0',
+                },
+                {
+                  id: MICROSOFT_NOTE_FACET_PROPERTY_ID.toLowerCase(),
+                  value: JSON.stringify({
+                    schemaVersion: 'beta',
+                    color: detailRequestCount <= 2 ? 1 : 5,
+                    '#type.color': 'Int32',
+                  }),
                 },
               ],
             }),
@@ -408,7 +417,22 @@ describe('fetchRemoteNotesDelta', () => {
         id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
         value: '0',
       },
+      expect.objectContaining({
+        id: MICROSOFT_NOTE_FACET_PROPERTY_ID,
+      }),
     ])
+    const updatedFacet = (
+      patchBody?.singleValueExtendedProperties as Array<{ value?: string }>
+    )?.[1]
+    expect(JSON.parse(updatedFacet?.value ?? '{}')).toMatchObject({
+      schemaVersion: 'beta',
+      color: 5,
+      '#type.color': 'Int32',
+      'color@Is.Queryable': 'True',
+      '#type.documentModifiedAt': 'DateTime',
+      'documentModifiedAt@Is.Queryable': 'True',
+    })
+    expect(updatedFacet?.value).toContain('"documentModifiedAt":"')
     expect(
       requestedPaths.some(
         (path) => path.includes('/attachments/') || path.endsWith('/$value'),

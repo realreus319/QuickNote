@@ -20,7 +20,9 @@ import {
 import { sortAttachmentsByBodyOrder } from '@/utils/noteAttachments'
 import {
   normalizeNoteColor,
+  noteColorFromMicrosoftFacetValue,
   noteColorFromMicrosoftValue,
+  noteColorToMicrosoftFacetValue,
   noteColorToMicrosoftValue,
   resolveSyncedNoteColor,
 } from '@/utils/noteColor'
@@ -29,12 +31,12 @@ import { readString } from '@/utils/text'
 const QUICKNOTE_RICH_HTML_PROPERTY_ID =
   'String {66f5a359-4659-4830-9070-00040ec6ac6e} Name QuickNoteRichHtml'
 const QUICKNOTE_RICH_HTML_QUERY_ID = encodeURIComponent(QUICKNOTE_RICH_HTML_PROPERTY_ID)
+export const MICROSOFT_NOTE_FACET_PROPERTY_ID =
+  'String {E550B918-9859-47B9-8095-97E4E72F1926} Name IOpenTypedFacet.Com_Microsoft_Note'
+const MICROSOFT_NOTE_FACET_QUERY_ID = encodeURIComponent(MICROSOFT_NOTE_FACET_PROPERTY_ID)
 export const MICROSOFT_NOTE_COLOR_PROPERTY_ID =
   'Integer {0006200E-0000-0000-C000-000000000046} Id 0x8B00'
 const MICROSOFT_NOTE_COLOR_QUERY_ID = encodeURIComponent(MICROSOFT_NOTE_COLOR_PROPERTY_ID)
-const NOTE_EXTENDED_PROPERTIES_FILTER =
-  `id%20eq%20'${QUICKNOTE_RICH_HTML_QUERY_ID}'%20or%20` +
-  `id%20eq%20'${MICROSOFT_NOTE_COLOR_QUERY_ID}'`
 
 interface MailFolderResponse {
   value?: Array<{
@@ -71,7 +73,11 @@ interface RemoteAttachmentRecord extends Record<string, unknown> {
 const NOTES_DELTA_QUERY =
   '$select=id,subject,body,bodyPreview,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$top=100'
 const SINGLE_NOTE_QUERY =
-  `$select=id,subject,body,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=${NOTE_EXTENDED_PROPERTIES_FILTER})`
+  `$select=id,subject,body,createdDateTime,lastModifiedDateTime,hasAttachments,changeKey&$expand=singleValueExtendedProperties($filter=id%20eq%20'${MICROSOFT_NOTE_FACET_QUERY_ID}')`
+const RICH_HTML_NOTE_QUERY =
+  `$select=id&$expand=singleValueExtendedProperties($filter=id%20eq%20'${QUICKNOTE_RICH_HTML_QUERY_ID}')`
+const LEGACY_COLOR_NOTE_QUERY =
+  `$select=id&$expand=singleValueExtendedProperties($filter=id%20eq%20'${MICROSOFT_NOTE_COLOR_QUERY_ID}')`
 const ATTACHMENT_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024
 
 const notesMessagesPathPromises = new Map<string, Promise<string>>()
@@ -129,7 +135,60 @@ export interface RemoteNoteSnapshot {
   content: string
   attachments: LocalNoteAttachment[]
   color: LocalNote['color']
+  microsoftNoteFacetValue?: string
   remoteChangeKey?: string
+}
+
+function extendedPropertyIdEquals(value: string | undefined, expected: string) {
+  return value?.toLowerCase() === expected.toLowerCase()
+}
+
+function findExtendedProperty(
+  message: RemoteMessageRecord,
+  propertyId: string,
+) {
+  return message.singleValueExtendedProperties?.find((property) =>
+    extendedPropertyIdEquals(property.id, propertyId),
+  )
+}
+
+function updateMicrosoftNoteFacetColor(
+  facetValue: string | undefined,
+  color: LocalNote['color'],
+) {
+  if (!facetValue) return undefined
+
+  try {
+    const parsed = JSON.parse(facetValue) as unknown
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined
+    }
+
+    return JSON.stringify({
+      ...parsed,
+      color: noteColorToMicrosoftFacetValue(color),
+      documentModifiedAt: toIsoNow(),
+      'color@Is.Queryable':
+        'color@Is.Queryable' in parsed
+          ? (parsed as Record<string, unknown>)['color@Is.Queryable']
+          : 'True',
+      '#type.color':
+        '#type.color' in parsed
+          ? (parsed as Record<string, unknown>)['#type.color']
+          : 'Int32',
+      'documentModifiedAt@Is.Queryable':
+        'documentModifiedAt@Is.Queryable' in parsed
+          ? (parsed as Record<string, unknown>)['documentModifiedAt@Is.Queryable']
+          : 'True',
+      '#type.documentModifiedAt':
+        '#type.documentModifiedAt' in parsed
+          ? (parsed as Record<string, unknown>)['#type.documentModifiedAt']
+          : 'DateTime',
+    })
+  } catch {
+    return undefined
+  }
 }
 
 function buildRemoteNotePayload(
@@ -137,6 +196,7 @@ function buildRemoteNotePayload(
   bodyHtml: string | undefined,
   canonicalBodyHtml: string | undefined,
   color: LocalNote['color'] | undefined,
+  microsoftNoteFacetValue?: string,
   includeMessageClass = false,
 ) {
   const payload: Record<string, unknown> = {}
@@ -165,6 +225,18 @@ function buildRemoteNotePayload(
       id: MICROSOFT_NOTE_COLOR_PROPERTY_ID,
       value: noteColorToMicrosoftValue(color),
     })
+
+    const updatedFacetValue = updateMicrosoftNoteFacetColor(
+      microsoftNoteFacetValue,
+      color,
+    )
+
+    if (updatedFacetValue) {
+      extendedProperties.push({
+        id: MICROSOFT_NOTE_FACET_PROPERTY_ID,
+        value: updatedFacetValue,
+      })
+    }
   }
 
   if (includeMessageClass) {
@@ -182,9 +254,7 @@ function buildRemoteNotePayload(
 }
 
 function readRemoteRichHtml(message: RemoteMessageRecord) {
-  return message.singleValueExtendedProperties?.find(
-    (property) => property.id === QUICKNOTE_RICH_HTML_PROPERTY_ID,
-  )?.value
+  return findExtendedProperty(message, QUICKNOTE_RICH_HTML_PROPERTY_ID)?.value
 }
 
 function readStoredImageIdFromImage(image: HTMLImageElement) {
@@ -291,6 +361,10 @@ function buildRemoteNoteSnapshot(
     content: derivePlainTextFromStoredHtml(storedBodyHtml),
     attachments,
     color: readRemoteNoteColor(message),
+    microsoftNoteFacetValue: findExtendedProperty(
+      message,
+      MICROSOFT_NOTE_FACET_PROPERTY_ID,
+    )?.value,
     remoteChangeKey: readString(message.changeKey),
   }
 }
@@ -302,8 +376,26 @@ export function isRemoteImageAttachment(attachment: RemoteAttachmentRecord) {
 }
 
 export function readRemoteNoteColor(message: RemoteMessageRecord) {
-  const value = message.singleValueExtendedProperties?.find(
-    (property) => property.id === MICROSOFT_NOTE_COLOR_PROPERTY_ID,
+  const facetProperty = findExtendedProperty(
+    message,
+    MICROSOFT_NOTE_FACET_PROPERTY_ID,
+  )
+
+  try {
+    if (facetProperty?.value) {
+      const facetColor = noteColorFromMicrosoftFacetValue(
+        (JSON.parse(facetProperty.value) as { color?: unknown }).color,
+      )
+
+      if (facetColor) return facetColor
+    }
+  } catch {
+    // Fall back to the classic Outlook note property below.
+  }
+
+  const value = findExtendedProperty(
+    message,
+    MICROSOFT_NOTE_COLOR_PROPERTY_ID,
   )?.value
 
   return noteColorFromMicrosoftValue(value)
@@ -460,15 +552,47 @@ async function fetchRemoteNoteAttachments(
 }
 
 async function fetchRemoteNoteRecord(accessToken: string, remoteId: string) {
-  return graphFetch<RemoteMessageRecord>(
-    accessToken,
-    `/v1.0/me/messages/${encodePathSegment(remoteId)}?${SINGLE_NOTE_QUERY}`,
-    {
-      headers: {
-        Prefer: 'outlook.body-content-type="html"',
+  const messagePath = `/v1.0/me/messages/${encodePathSegment(remoteId)}`
+  const [message, richHtmlMessage] = await Promise.all([
+    graphFetch<RemoteMessageRecord>(
+      accessToken,
+      `${messagePath}?${SINGLE_NOTE_QUERY}`,
+      {
+        headers: {
+          Prefer: 'outlook.body-content-type="html"',
+        },
       },
-    },
-  )
+    ),
+    graphFetch<RemoteMessageRecord>(
+      accessToken,
+      `${messagePath}?${RICH_HTML_NOTE_QUERY}`,
+    ),
+  ])
+  let extendedProperties = [
+    ...(message.singleValueExtendedProperties ?? []),
+    ...(richHtmlMessage.singleValueExtendedProperties ?? []),
+  ]
+
+  if (
+    !findExtendedProperty(
+      { singleValueExtendedProperties: extendedProperties },
+      MICROSOFT_NOTE_FACET_PROPERTY_ID,
+    )
+  ) {
+    const legacyColorMessage = await graphFetch<RemoteMessageRecord>(
+      accessToken,
+      `${messagePath}?${LEGACY_COLOR_NOTE_QUERY}`,
+    )
+    extendedProperties = [
+      ...extendedProperties,
+      ...(legacyColorMessage.singleValueExtendedProperties ?? []),
+    ]
+  }
+
+  return {
+    ...message,
+    singleValueExtendedProperties: extendedProperties,
+  }
 }
 
 async function fetchRemoteNoteSnapshot(
@@ -800,6 +924,7 @@ export async function createRemoteNote(
         remoteBodyHtml,
         note.bodyHtml,
         normalizeNoteColor(note.color),
+        undefined,
         true,
       ),
     ),
@@ -881,6 +1006,7 @@ export async function updateRemoteNote(accessToken: string, note: LocalNote) {
       : undefined,
     targetCanonicalHtml !== currentRemoteCanonicalHtml ? targetCanonicalHtml : undefined,
     targetColor !== currentRemote.color ? targetColor : undefined,
+    currentRemote.microsoftNoteFacetValue,
   )
 
   if (Object.keys(payload).length) {

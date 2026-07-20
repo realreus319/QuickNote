@@ -25,6 +25,26 @@ const colorByMicrosoftValue = new Map(
   Object.entries(microsoftValueByColor).map(([color, value]) => [value, color as NoteColor]),
 )
 
+const microsoftFacetValueByColor: Record<NoteColor, number> = {
+  white: 0,
+  yellow: 1,
+  green: 2,
+  pink: 3,
+  blue: 5,
+}
+
+const colorByMicrosoftFacetValue = new Map<number, NoteColor>([
+  [0, 'white'],
+  [1, 'yellow'],
+  [2, 'green'],
+  [3, 'pink'],
+  // Modern Sticky Notes also exposes purple and charcoal. The product's
+  // intentionally limited five-color palette uses the nearest supported paper.
+  [4, 'pink'],
+  [5, 'blue'],
+  [6, 'white'],
+])
+
 export function isNoteColor(value: unknown): value is NoteColor {
   return NOTE_COLOR_OPTIONS.some((option) => option.value === value)
 }
@@ -61,6 +81,23 @@ export function noteColorFromMicrosoftValue(value: unknown): NoteColor {
 
 export function noteColorToMicrosoftValue(color: NoteColor): string {
   return microsoftValueByColor[color]
+}
+
+export function noteColorFromMicrosoftFacetValue(value: unknown): NoteColor | undefined {
+  const normalizedValue =
+    typeof value === 'number' && Number.isInteger(value)
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : Number.NaN
+
+  return Number.isInteger(normalizedValue)
+    ? colorByMicrosoftFacetValue.get(normalizedValue)
+    : undefined
+}
+
+export function noteColorToMicrosoftFacetValue(color: NoteColor): number {
+  return microsoftFacetValueByColor[color]
 }
 
 export function resolveSyncedNoteColor(

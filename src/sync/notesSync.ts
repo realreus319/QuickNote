@@ -45,7 +45,7 @@ export function getNotesDeltaStateKey(homeAccountId: string) {
     throw new Error('缺少 Microsoft 账户标识')
   }
 
-  return `notesDeltaLink:${accountKey}`
+  return `notesDeltaLink:v2:${accountKey}`
 }
 
 export function isInvalidNotesDeltaError(error: unknown) {
