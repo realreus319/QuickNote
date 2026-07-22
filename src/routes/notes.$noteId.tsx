@@ -18,6 +18,10 @@ import {
 import { downloadRemoteNoteAttachment } from '@/graph/notesApi'
 import type { LocalNoteAttachment, NoteColor } from '@/types/domain'
 import {
+  assertSafeImageDimensions,
+  base64ToBlob,
+} from '@/utils/noteAttachments'
+import {
   buildNoteContentSignature,
   buildNoteSnapshotSignature,
   shouldAutosaveNote,
@@ -65,7 +69,11 @@ function NoteDetailPage() {
       return
     }
 
-    const currentSignature = buildNoteContentSignature(title, bodyHtml, attachments)
+    const currentSignature = buildNoteContentSignature(
+      title,
+      bodyHtml,
+      attachments,
+    )
 
     if (currentSignature !== hydrationSignatureRef.current) {
       return
@@ -77,9 +85,19 @@ function NoteDetailPage() {
   useEffect(() => {
     if (!note) return
 
-    const currentSignature = buildNoteContentSignature(title, bodyHtml, attachments)
+    const currentSignature = buildNoteContentSignature(
+      title,
+      bodyHtml,
+      attachments,
+    )
 
-    if (!shouldAutosaveNote(currentSignature, hydrationSignatureRef.current, isHydratingRef.current)) {
+    if (
+      !shouldAutosaveNote(
+        currentSignature,
+        hydrationSignatureRef.current,
+        isHydratingRef.current,
+      )
+    ) {
       return
     }
 
@@ -126,12 +144,15 @@ function NoteDetailPage() {
         note.remoteId,
         attachment,
       )
-      await cacheRemoteAttachment(noteId, downloaded)
-      setAttachments((current) =>
-        current.map((candidate) =>
-          candidate.id === downloaded.id ? downloaded : candidate,
-        ),
+
+      if (!downloaded.base64) {
+        throw new Error('远端图片内容为空')
+      }
+
+      await assertSafeImageDimensions(
+        base64ToBlob(downloaded.base64, downloaded.mimeType),
       )
+      await cacheRemoteAttachment(noteId, downloaded)
       toast('图片已加载')
     } catch (error) {
       toast(error instanceof Error ? error.message : '图片加载失败')
@@ -164,7 +185,9 @@ function NoteDetailPage() {
   }
 
   if (note.deleted) {
-    return <EmptyState title="笔记已删除" description="这条笔记已经移出列表。" />
+    return (
+      <EmptyState title="笔记已删除" description="这条笔记已经移出列表。" />
+    )
   }
 
   return (
@@ -178,7 +201,9 @@ function NoteDetailPage() {
           pinned={note.pinned}
           color={normalizeNoteColor(note.color)}
           syncStatus={note.syncStatus}
-          onBack={() => runWithViewTransition(() => navigate({ to: '/notes' }))}
+          onBack={() =>
+            runWithViewTransition(() => navigate({ to: '/notes' }))
+          }
           onDelete={() => void handleDelete()}
           onShare={() => void handleShare()}
           onColorChange={(color) => void handleColorChange(color)}
