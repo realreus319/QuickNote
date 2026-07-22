@@ -27,7 +27,8 @@ export async function persistNoteAttachmentBlobs(
   const records = attachments
     .filter(
       (attachment): attachment is LocalNoteAttachment & { base64: string } =>
-        Boolean(attachment.base64),
+        Boolean(attachment.base64) &&
+        attachment.storageState !== 'remote-only',
     )
     .map(
       (attachment): NoteAttachmentBlobRecord => ({
@@ -130,9 +131,8 @@ export async function enforceAttachmentCacheBudget(
     )
   }
 
-  const liveRecords = records.filter(
-    (record) => !orphanRecords.some((orphan) => orphan.id === record.id),
-  )
+  const orphanIds = new Set(orphanRecords.map((record) => record.id))
+  const liveRecords = records.filter((record) => !orphanIds.has(record.id))
   let totalBytes = liveRecords.reduce(
     (total, record) => total + record.blob.size,
     0,
