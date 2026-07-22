@@ -24,8 +24,13 @@ export function useAutoSync(enabled = true) {
   const { isAuthenticated, initializing } = useAuth()
   const networkStatus = useNetworkStatus()
   const mutation = useSyncMutation()
+  const mutateAsyncRef = useRef(mutation.mutateAsync)
   const mutationPendingRef = useRef(false)
   const timerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    mutateAsyncRef.current = mutation.mutateAsync
+  }, [mutation.mutateAsync])
 
   useEffect(() => {
     mutationPendingRef.current = mutation.isPending
@@ -42,8 +47,8 @@ export function useAutoSync(enabled = true) {
       return
     }
 
-    void mutation.mutateAsync()
-  }, [enabled, initializing, isAuthenticated, mutation, networkStatus])
+    void mutateAsyncRef.current()
+  }, [enabled, initializing, isAuthenticated, networkStatus])
 
   const scheduleSync = useCallback(
     (delayMs = 0) => {
