@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CloudOff, Pin, TriangleAlert } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { getActiveOwnerKey } from '@/db/accountScope'
 import { getNoteAttachmentBlob } from '@/db/attachmentBlobRepo'
@@ -49,31 +49,65 @@ function useObjectUrl(blob: Blob | undefined) {
 }
 
 function NoteCardPreview({ note }: { note: LocalNote }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
   const previewImage = note.attachments.find(
     (attachment) =>
       attachment.mimeType.startsWith('image/') &&
       attachment.storageState !== 'remote-only',
   )
   const ownerKey = note.ownerKey ?? getActiveOwnerKey()
+
+  useEffect(() => {
+    const element = containerRef.current
+
+    if (!element || !previewImage || visible) return
+
+    if (typeof IntersectionObserver !== 'function') {
+      setVisible(true)
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setVisible(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '400px' },
+    )
+
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [previewImage, visible])
+
   const blob = useLiveQuery(
     () =>
-      previewImage && ownerKey
+      visible && previewImage && ownerKey
         ? getNoteAttachmentBlob(note.id, previewImage.id, ownerKey)
         : Promise.resolve(undefined),
-    [note.id, ownerKey, previewImage?.id],
+    [note.id, ownerKey, previewImage?.id, visible],
   )
   const objectUrl = useObjectUrl(blob)
 
-  if (!objectUrl) return null
+  if (!previewImage) return null
 
   return (
-    <img
-      src={objectUrl}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      className="order-first mb-3 aspect-[4/3] w-full max-w-full rounded-[11px] border border-[color:var(--note-line)] bg-[color:var(--note-paper-raised)] object-cover"
-    />
+    <div
+      ref={containerRef}
+      className="order-first mb-3 aspect-[4/3] w-full max-w-full overflow-hidden rounded-[11px] border border-[color:var(--note-line)] bg-[color:var(--note-paper-raised)]"
+    >
+      {objectUrl ? (
+        <img
+          src={objectUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="size-full object-cover"
+        />
+      ) : null}
+    </div>
   )
 }
 
