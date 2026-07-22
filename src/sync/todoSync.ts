@@ -11,6 +11,7 @@ import {
   deleteRemoteTodo,
   fetchRemoteTodoLists,
   fetchRemoteTodos,
+  findRemoteTodoByLocalId,
   updateRemoteTodo,
 } from '@/graph/todoApi'
 import type { PendingOperation } from '@/types/domain'
@@ -38,10 +39,15 @@ export async function replayTodoOperation(
   const expectedRevision = Math.max(1, operation.targetRevision ?? 1)
   const todo = await db.todos.get(operation.localId)
   const ownedTodo = todo?.ownerKey === ownerKey ? todo : undefined
-  const remoteId = readString(operation.payload.remoteId, ownedTodo?.remoteId ?? '')
+  const remoteId = readString(
+    operation.payload.remoteId,
+    ownedTodo?.remoteId ?? '',
+  )
   const listRemoteId =
     readString(operation.payload.listRemoteId) ||
-    (ownedTodo ? await resolveListRemoteId(ownedTodo.listId, ownerKey) : undefined)
+    (ownedTodo
+      ? await resolveListRemoteId(ownedTodo.listId, ownerKey)
+      : undefined)
 
   if (operation.operation === 'delete') {
     if (listRemoteId && remoteId) {
@@ -58,7 +64,28 @@ export async function replayTodoOperation(
   }
 
   if (!ownedTodo.remoteId) {
-    const response = await createRemoteTodo(accessToken, listRemoteId, ownedTodo)
+    const existingRemote = await findRemoteTodoByLocalId(
+      accessToken,
+      listRemoteId,
+      ownedTodo.id,
+    )
+    const existingRemoteId = readString(existingRemote?.id)
+
+    if (existingRemoteId) {
+      await applySyncedTodo(
+        operation.localId,
+        existingRemoteId,
+        expectedRevision,
+        ownerKey,
+      )
+      return
+    }
+
+    const response = await createRemoteTodo(
+      accessToken,
+      listRemoteId,
+      ownedTodo,
+    )
     const createdRemoteId = readString(response.id)
 
     if (!createdRemoteId) {
