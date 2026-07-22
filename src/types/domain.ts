@@ -56,11 +56,23 @@ export interface LocalNoteAttachment {
   name: string
   mimeType: string
   size: number
-  base64: string
+  base64?: string
   contentId: string
   createdAt: string
   storageState?: NoteAttachmentStorageState
   lastError?: string
+}
+
+export interface NoteAttachmentBlobRecord {
+  id: string
+  ownerKey: string
+  noteId: string
+  attachmentId: string
+  blob: Blob
+  mimeType: string
+  size: number
+  createdAt: string
+  lastAccessedAt: string
 }
 
 export interface LocalTodoList {
