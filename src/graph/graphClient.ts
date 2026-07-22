@@ -9,6 +9,10 @@ export interface GraphRequestInit extends RequestInit {
   maxRetries?: number
 }
 
+export interface GraphBlobRequestInit extends GraphRequestInit {
+  maxBytes?: number
+}
+
 export function resolveGraphRequestUrl(path: string) {
   if (path.startsWith('/')) {
     return `${GRAPH_BASE}${path}`
@@ -46,11 +50,16 @@ export class GraphRequestError extends Error {
   }
 }
 
+function createRequestId() {
+  return globalThis.crypto?.randomUUID?.() ??
+    `quicknote-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 function createGraphHeaders(accessToken: string, init?: RequestInit) {
   const headers = new Headers(init?.headers)
 
   headers.set('Authorization', `Bearer ${accessToken}`)
-  headers.set('client-request-id', crypto.randomUUID())
+  headers.set('client-request-id', createRequestId())
   headers.set('return-client-request-id', 'true')
 
   if (init?.body && !headers.has('Content-Type')) {
@@ -83,11 +92,14 @@ function getRetryDelay(attempt: number, retryAfterMs?: number) {
 
 function sleep(delayMs: number) {
   return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, delayMs)
+    globalThis.setTimeout(resolve, delayMs)
   })
 }
 
-function createAttemptSignal(externalSignal: AbortSignal | null | undefined, timeoutMs: number) {
+function createAttemptSignal(
+  externalSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+) {
   const controller = new AbortController()
   const timeoutId = globalThis.setTimeout(() => {
     controller.abort(new DOMException('Graph 请求超时', 'TimeoutError'))
@@ -204,26 +216,11 @@ export async function graphFetch<T>(
   return (await response.json()) as T
 }
 
-export async function graphFetchBlob(
-  accessToken: string,
-  path: string,
-  init?: GraphRequestInit,
-) {
-  const response = await graphFetchRaw(accessToken, path, init)
-
-  return {
-    blob: await response.blob(),
-    contentType: response.headers.get('content-type') ?? '',
+async function responseToLimitedBlob(response: Response, maxBytes?: number) {
+  if (maxBytes == null) {
+    return response.blob()
   }
-}
 
-export async function graphFetchBlobWithLimit(
-  accessToken: string,
-  path: string,
-  maxBytes: number,
-  init?: GraphRequestInit,
-) {
-  const response = await graphFetchRaw(accessToken, path, init)
   const declaredSize = Number(response.headers.get('content-length') ?? 0)
 
   if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
@@ -238,10 +235,7 @@ export async function graphFetchBlobWithLimit(
       throw new Error('图片超过允许下载的大小')
     }
 
-    return {
-      blob,
-      contentType: response.headers.get('content-type') ?? blob.type,
-    }
+    return blob
   }
 
   const reader = response.body.getReader()
@@ -264,12 +258,36 @@ export async function graphFetchBlobWithLimit(
     chunks.push(value)
   }
 
+  return new Blob(chunks, {
+    type: response.headers.get('content-type') ?? 'application/octet-stream',
+  })
+}
+
+export async function graphFetchBlob(
+  accessToken: string,
+  path: string,
+  init: GraphBlobRequestInit = {},
+) {
+  const { maxBytes, ...requestInit } = init
+  const response = await graphFetchRaw(accessToken, path, requestInit)
+  const blob = await responseToLimitedBlob(response, maxBytes)
+
   return {
-    blob: new Blob(chunks, {
-      type: response.headers.get('content-type') ?? 'application/octet-stream',
-    }),
-    contentType: response.headers.get('content-type') ?? '',
+    blob,
+    contentType: response.headers.get('content-type') ?? blob.type,
   }
+}
+
+export async function graphFetchBlobWithLimit(
+  accessToken: string,
+  path: string,
+  maxBytes: number,
+  init?: GraphRequestInit,
+) {
+  return graphFetchBlob(accessToken, path, {
+    ...init,
+    maxBytes,
+  })
 }
 
 export async function fetchAllGraphPages<T>(
