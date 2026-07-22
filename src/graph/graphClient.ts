@@ -1,8 +1,16 @@
 const GRAPH_BASE = 'https://graph.microsoft.com'
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_RETRIES = 3
+const DEFAULT_MAX_IMAGE_PIXELS = 40_000_000
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
-const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'])
+const RETRYABLE_METHODS = new Set([
+  'GET',
+  'HEAD',
+  'OPTIONS',
+  'PUT',
+  'PATCH',
+  'DELETE',
+])
 
 export interface GraphRequestInit extends RequestInit {
   timeoutMs?: number
@@ -11,6 +19,7 @@ export interface GraphRequestInit extends RequestInit {
 
 export interface GraphBlobRequestInit extends GraphRequestInit {
   maxBytes?: number
+  maxImagePixels?: number
 }
 
 export function resolveGraphRequestUrl(path: string) {
@@ -51,8 +60,10 @@ export class GraphRequestError extends Error {
 }
 
 function createRequestId() {
-  return globalThis.crypto?.randomUUID?.() ??
+  return (
+    globalThis.crypto?.randomUUID?.() ??
     `quicknote-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  )
 }
 
 function createGraphHeaders(accessToken: string, init?: RequestInit) {
@@ -113,7 +124,9 @@ function createAttemptSignal(
     if (externalSignal.aborted) {
       abortFromExternal()
     } else {
-      externalSignal.addEventListener('abort', abortFromExternal, { once: true })
+      externalSignal.addEventListener('abort', abortFromExternal, {
+        once: true,
+      })
     }
   }
 
@@ -144,7 +157,10 @@ export async function graphFetchRaw(
   let attempt = 0
 
   while (true) {
-    const { signal, cleanup } = createAttemptSignal(requestInit.signal, timeoutMs)
+    const { signal, cleanup } = createAttemptSignal(
+      requestInit.signal,
+      timeoutMs,
+    )
 
     try {
       const response = await fetch(resolveGraphRequestUrl(path), {
@@ -158,7 +174,9 @@ export async function graphFetchRaw(
       }
 
       const body = await response.text()
-      const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'))
+      const retryAfterMs = parseRetryAfter(
+        response.headers.get('retry-after'),
+      )
       const error = new GraphRequestError(
         body || response.statusText,
         response.status,
@@ -216,51 +234,82 @@ export async function graphFetch<T>(
   return (await response.json()) as T
 }
 
-async function responseToLimitedBlob(response: Response, maxBytes?: number) {
+async function assertSafeImageBlob(blob: Blob, maxImagePixels?: number) {
+  if (
+    maxImagePixels == null ||
+    !blob.type.toLowerCase().startsWith('image/') ||
+    typeof createImageBitmap !== 'function'
+  ) {
+    return
+  }
+
+  let bitmap: ImageBitmap | undefined
+
+  try {
+    bitmap = await createImageBitmap(blob)
+
+    if (bitmap.width * bitmap.height > maxImagePixels) {
+      throw new Error('图片超过允许下载的安全分辨率')
+    }
+  } finally {
+    bitmap?.close()
+  }
+}
+
+async function responseToLimitedBlob(
+  response: Response,
+  maxBytes?: number,
+  maxImagePixels?: number,
+) {
+  let blob: Blob
+
   if (maxBytes == null) {
-    return response.blob()
-  }
+    blob = await response.blob()
+  } else {
+    const declaredSize = Number(response.headers.get('content-length') ?? 0)
 
-  const declaredSize = Number(response.headers.get('content-length') ?? 0)
-
-  if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
-    await response.body?.cancel()
-    throw new Error('图片超过允许下载的大小')
-  }
-
-  if (!response.body) {
-    const blob = await response.blob()
-
-    if (blob.size > maxBytes) {
+    if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
+      await response.body?.cancel()
       throw new Error('图片超过允许下载的大小')
     }
 
-    return blob
-  }
+    if (!response.body) {
+      blob = await response.blob()
 
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let totalBytes = 0
+      if (blob.size > maxBytes) {
+        throw new Error('图片超过允许下载的大小')
+      }
+    } else {
+      const reader = response.body.getReader()
+      const chunks: Uint8Array[] = []
+      let totalBytes = 0
 
-  while (true) {
-    const { done, value } = await reader.read()
+      while (true) {
+        const { done, value } = await reader.read()
 
-    if (done) break
-    if (!value) continue
+        if (done) break
+        if (!value) continue
 
-    totalBytes += value.byteLength
+        totalBytes += value.byteLength
 
-    if (totalBytes > maxBytes) {
-      await reader.cancel()
-      throw new Error('图片实际大小超过允许下载的限制')
+        if (totalBytes > maxBytes) {
+          await reader.cancel()
+          throw new Error('图片实际大小超过允许下载的限制')
+        }
+
+        chunks.push(value)
+      }
+
+      blob = new Blob(chunks, {
+        type:
+          response.headers.get('content-type') ??
+          'application/octet-stream',
+      })
     }
-
-    chunks.push(value)
   }
 
-  return new Blob(chunks, {
-    type: response.headers.get('content-type') ?? 'application/octet-stream',
-  })
+  await assertSafeImageBlob(blob, maxImagePixels)
+  return blob
 }
 
 export async function graphFetchBlob(
@@ -268,9 +317,19 @@ export async function graphFetchBlob(
   path: string,
   init: GraphBlobRequestInit = {},
 ) {
-  const { maxBytes, ...requestInit } = init
+  const {
+    maxBytes,
+    maxImagePixels = maxBytes == null
+      ? undefined
+      : DEFAULT_MAX_IMAGE_PIXELS,
+    ...requestInit
+  } = init
   const response = await graphFetchRaw(accessToken, path, requestInit)
-  const blob = await responseToLimitedBlob(response, maxBytes)
+  const blob = await responseToLimitedBlob(
+    response,
+    maxBytes,
+    maxImagePixels,
+  )
 
   return {
     blob,
