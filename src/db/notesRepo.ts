@@ -189,7 +189,7 @@ export async function updateNote(
         'note',
         current.remoteId ? 'update' : 'create',
         noteId,
-        stored as unknown as Record<string, unknown>,
+        stored,
         ownerKey,
       )
 

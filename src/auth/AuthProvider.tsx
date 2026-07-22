@@ -170,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const interactionRequired = caughtError instanceof InteractionRequiredAuthError
 
       if ((cacheFailure || interactionRequired) && navigator.onLine) {
-        let redirectStarted = false
+        let redirectStarted: boolean
 
         try {
           redirectStarted = await startInteractiveRecovery(cacheFailure)
@@ -182,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (redirectStarted) {
           setError(null)
-          throw new Error('正在重新连接 Microsoft 账户')
+          throw new Error('正在重新连接 Microsoft 账户', { cause: caughtError })
         }
       }
 

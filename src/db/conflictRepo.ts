@@ -28,7 +28,7 @@ export async function resolveNoteConflictKeepLocal(
       'note',
       note.remoteId ? 'update' : 'create',
       note.id,
-      next as unknown as Record<string, unknown>,
+      next,
       ownerKey,
     )
 

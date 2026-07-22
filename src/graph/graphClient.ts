@@ -281,7 +281,7 @@ async function responseToLimitedBlob(
       }
     } else {
       const reader = response.body.getReader()
-      const chunks: Uint8Array[] = []
+      const chunks: ArrayBuffer[] = []
       let totalBytes = 0
 
       while (true) {
@@ -297,7 +297,9 @@ async function responseToLimitedBlob(
           throw new Error('图片实际大小超过允许下载的限制')
         }
 
-        chunks.push(value)
+        const chunk = new Uint8Array(value.byteLength)
+        chunk.set(value)
+        chunks.push(chunk.buffer)
       }
 
       blob = new Blob(chunks, {

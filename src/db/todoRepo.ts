@@ -188,7 +188,7 @@ export async function syncRemoteTodoLists(
     )
 
     const mapped = lists
-      .map((item) => {
+      .map<LocalTodoList | null>((item) => {
         const remoteId = readString(item.id)
 
         if (!remoteId) return null

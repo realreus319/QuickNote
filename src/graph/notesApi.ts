@@ -71,6 +71,7 @@ interface MailFolderResponse {
 }
 
 interface RemoteMessageRecord extends Record<string, unknown> {
+  id?: string
   hasAttachments?: boolean
   changeKey?: string
   '@removed'?: {
@@ -148,7 +149,7 @@ async function mapWithConcurrency<T, R>(
       nextIndex += 1
 
       if (index >= values.length) return
-      results[index] = await mapper(values[index] as T, index)
+      results[index] = await mapper(values[index], index)
     }
   }
 
@@ -524,7 +525,7 @@ async function getRemoteAttachmentDetails(
 ) {
   return graphFetch<RemoteAttachmentRecord>(
     accessToken,
-    `/v1.0/me/messages/${encodePathSegment(messageId)}/attachments/${encodePathSegment(attachmentId)}?$select=id,name,contentType,size,contentId,isInline`,
+    `/v1.0/me/messages/${encodePathSegment(messageId)}/attachments/${encodePathSegment(attachmentId)}?$select=id,name,contentType,size,isInline`,
   )
 }
 

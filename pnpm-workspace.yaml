@@ -1,6 +1,11 @@
 packages:
   - '.'
 
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+
 minimumReleaseAgeExclude:
   - '@tiptap/core@3.27.2'
   - '@tiptap/extension-blockquote@3.27.2'

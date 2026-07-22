@@ -91,10 +91,10 @@ function SettingsPage() {
     { bytes: 0, count: 0 },
   )
   const lastSyncedAt = useLiveQuery(
-    () =>
+    async () =>
       ownerKey
-        ? db.appState.get(`account:${ownerKey}:lastSyncedAt`)
-        : Promise.resolve(undefined),
+        ? await db.appState.get(`account:${ownerKey}:lastSyncedAt`)
+        : undefined,
     [ownerKey],
   )
 
@@ -115,12 +115,14 @@ function SettingsPage() {
 
     await db.transaction(
       'rw',
-      db.notes,
-      db.noteAttachmentBlobs,
-      db.todos,
-      db.todoLists,
-      db.pendingOperations,
-      db.appState,
+      [
+        db.notes,
+        db.noteAttachmentBlobs,
+        db.todos,
+        db.todoLists,
+        db.pendingOperations,
+        db.appState,
+      ],
       async () => {
         const snapshotAccount = await db.appState.get(
           'notesSnapshotAccountId',
