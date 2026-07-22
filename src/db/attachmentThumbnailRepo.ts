@@ -4,6 +4,8 @@ import type { LocalNoteAttachment } from '@/types/domain'
 const THUMBNAIL_CACHE_NAME = 'quicknote-thumbnails-v1'
 const THUMBNAIL_MAX_EDGE = 1024
 const THUMBNAIL_QUALITY = 0.78
+const THUMBNAIL_CACHE_MAX_ENTRIES = 500
+const THUMBNAIL_CACHE_TRIM_TO_ENTRIES = 400
 
 function buildThumbnailCacheUrl(
   ownerKey: string,
@@ -75,6 +77,17 @@ async function readCachedThumbnail(cacheUrl: string) {
   return (await cache.match(cacheUrl))?.blob()
 }
 
+async function trimThumbnailCache(cache: Cache) {
+  const requests = await cache.keys()
+
+  if (requests.length <= THUMBNAIL_CACHE_MAX_ENTRIES) return
+
+  const excessCount = requests.length - THUMBNAIL_CACHE_TRIM_TO_ENTRIES
+  await Promise.all(
+    requests.slice(0, excessCount).map((request) => cache.delete(request)),
+  )
+}
+
 async function cacheThumbnail(cacheUrl: string, blob: Blob) {
   if (!('caches' in globalThis)) return
 
@@ -88,6 +101,7 @@ async function cacheThumbnail(cacheUrl: string, blob: Blob) {
       },
     }),
   )
+  await trimThumbnailCache(cache)
 }
 
 export async function getNoteAttachmentThumbnail(
