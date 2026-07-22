@@ -4,7 +4,7 @@ import { CloudOff, Pin, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { getActiveOwnerKey } from '@/db/accountScope'
-import { getNoteAttachmentBlob } from '@/db/attachmentBlobRepo'
+import { getNoteAttachmentThumbnail } from '@/db/attachmentThumbnailRepo'
 import type { LocalNote } from '@/types/domain'
 import { formatNoteDate } from '@/utils/date'
 import { normalizeNoteColor } from '@/utils/noteColor'
@@ -85,9 +85,17 @@ function NoteCardPreview({ note }: { note: LocalNote }) {
   const blob = useLiveQuery(
     () =>
       visible && previewImage && ownerKey
-        ? getNoteAttachmentBlob(note.id, previewImage.id, ownerKey)
+        ? getNoteAttachmentThumbnail(note.id, previewImage, ownerKey)
         : Promise.resolve(undefined),
-    [note.id, ownerKey, previewImage?.id, visible],
+    [
+      note.id,
+      ownerKey,
+      previewImage?.id,
+      previewImage?.size,
+      previewImage?.createdAt,
+      previewImage?.remoteId,
+      visible,
+    ],
   )
   const objectUrl = useObjectUrl(blob)
 
