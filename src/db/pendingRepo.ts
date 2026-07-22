@@ -22,26 +22,35 @@ function operationRevision(payload: Record<string, unknown>, fallback = 1) {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
 }
 
+function sortOperations<T extends { createdAt: string }>(operations: T[]) {
+  return operations.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+}
+
+export async function listAllPendingOperations(
+  ownerKey = requireActiveOwnerKey(),
+) {
+  return sortOperations(
+    await db.pendingOperations.where('ownerKey').equals(ownerKey).toArray(),
+  )
+}
+
 export async function listPendingOperations(ownerKey = requireActiveOwnerKey()) {
   const now = toIsoNow()
-  const operations = await db.pendingOperations.where('ownerKey').equals(ownerKey).toArray()
+  const operations = await listAllPendingOperations(ownerKey)
 
-  return operations
-    .filter((operation) => {
-      const status = operation.status ?? 'pending'
+  return operations.filter((operation) => {
+    const status = operation.status ?? 'pending'
 
-      if (status === 'conflict' || status === 'dead-letter') {
-        return false
-      }
+    if (status === 'conflict' || status === 'dead-letter') {
+      return false
+    }
 
-      return !operation.nextAttemptAt || operation.nextAttemptAt <= now
-    })
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    return !operation.nextAttemptAt || operation.nextAttemptAt <= now
+  })
 }
 
 export async function countPendingOperations(ownerKey = requireActiveOwnerKey()) {
-  const operations = await db.pendingOperations.where('ownerKey').equals(ownerKey).toArray()
-  return operations.filter((operation) => operation.status !== 'dead-letter').length
+  return db.pendingOperations.where('ownerKey').equals(ownerKey).count()
 }
 
 export async function completePendingOperation(
@@ -49,7 +58,7 @@ export async function completePendingOperation(
   targetRevision: number,
   ownerKey = requireActiveOwnerKey(),
 ) {
-  return db.transaction('rw', db.pendingOperations, async () => {
+  const removed = await db.transaction('rw', db.pendingOperations, async () => {
     const operation = await db.pendingOperations.get(id)
 
     if (
@@ -61,9 +70,11 @@ export async function completePendingOperation(
     }
 
     await db.pendingOperations.delete(id)
-    notifyPendingOperationChanged()
     return true
   })
+
+  if (removed) notifyPendingOperationChanged()
+  return removed
 }
 
 export async function removePendingOperationsForLocalId(
@@ -76,6 +87,53 @@ export async function removePendingOperationsForLocalId(
     .toArray()
 
   await db.pendingOperations.bulkDelete(items.map((item) => item.id))
+  notifyPendingOperationChanged()
+}
+
+export async function retryPendingOperation(
+  id: string,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  await db.transaction(
+    'rw',
+    db.pendingOperations,
+    db.notes,
+    db.todos,
+    async () => {
+      const operation = await db.pendingOperations.get(id)
+
+      if (!operation || operation.ownerKey !== ownerKey) {
+        throw new Error('同步操作不属于当前账户')
+      }
+
+      await db.pendingOperations.put({
+        ...operation,
+        status: 'pending',
+        retryCount: 0,
+        nextAttemptAt: undefined,
+        lastAttemptAt: undefined,
+        lastError: undefined,
+      })
+
+      if (operation.entityType === 'note') {
+        const note = await db.notes.get(operation.localId)
+        if (note?.ownerKey === ownerKey) {
+          await db.notes.put({
+            ...note,
+            syncStatus: 'pending',
+          })
+        }
+      } else {
+        const todo = await db.todos.get(operation.localId)
+        if (todo?.ownerKey === ownerKey) {
+          await db.todos.put({
+            ...todo,
+            syncStatus: 'pending',
+          })
+        }
+      }
+    },
+  )
   notifyPendingOperationChanged()
 }
 
@@ -93,9 +151,11 @@ export async function markPendingOperationError(
 
   const retryCount = operation.retryCount + 1
   const status =
-    options.status ?? (retryCount >= MAX_RETRY_COUNT ? 'dead-letter' : 'retry-wait')
+    options.status ??
+    (retryCount >= MAX_RETRY_COUNT ? 'dead-letter' : 'retry-wait')
   const retryAfterMs =
-    options.retryAfterMs ?? Math.min(15 * 60_000, 2 ** Math.min(retryCount, 8) * 1_000)
+    options.retryAfterMs ??
+    Math.min(15 * 60_000, 2 ** Math.min(retryCount, 8) * 1_000)
 
   await db.pendingOperations.put({
     ...operation,
@@ -103,7 +163,9 @@ export async function markPendingOperationError(
     status,
     lastAttemptAt: toIsoNow(),
     nextAttemptAt:
-      status === 'retry-wait' ? new Date(Date.now() + retryAfterMs).toISOString() : undefined,
+      status === 'retry-wait'
+        ? new Date(Date.now() + retryAfterMs).toISOString()
+        : undefined,
     lastError,
   })
   notifyPendingOperationChanged()
