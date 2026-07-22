@@ -15,7 +15,10 @@ import {
   getNoteById,
   updateNote,
 } from '@/db/notesRepo'
-import { downloadRemoteNoteAttachment } from '@/graph/notesApi'
+import {
+  AUTO_DOWNLOAD_NOTE_ATTACHMENT_MAX_BYTES,
+  downloadRemoteNoteAttachment,
+} from '@/graph/notesApi'
 import type { LocalNoteAttachment, NoteColor } from '@/types/domain'
 import {
   assertSafeImageDimensions,
@@ -152,8 +155,29 @@ function NoteDetailPage() {
       await assertSafeImageDimensions(
         base64ToBlob(downloaded.base64, downloaded.mimeType),
       )
-      await cacheRemoteAttachment(noteId, downloaded)
-      toast('图片已加载')
+
+      if (downloaded.size <= AUTO_DOWNLOAD_NOTE_ATTACHMENT_MAX_BYTES) {
+        await cacheRemoteAttachment(noteId, downloaded)
+        toast('图片已加载')
+        return
+      }
+
+      const memoryOnlyAttachment = {
+        ...downloaded,
+        storageState: 'remote-only' as const,
+      }
+      const nextAttachments = attachments.map((candidate) =>
+        candidate.id === downloaded.id ? memoryOnlyAttachment : candidate,
+      )
+
+      hydrationSignatureRef.current = buildNoteContentSignature(
+        title,
+        bodyHtml,
+        nextAttachments,
+      )
+      isHydratingRef.current = true
+      setAttachments(nextAttachments)
+      toast('图片已加载，本次查看后不会保留原图缓存')
     } catch (error) {
       toast(error instanceof Error ? error.message : '图片加载失败')
     } finally {
