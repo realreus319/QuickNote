@@ -7,6 +7,10 @@ const THUMBNAIL_QUALITY = 0.78
 const THUMBNAIL_CACHE_MAX_ENTRIES = 500
 const THUMBNAIL_CACHE_TRIM_TO_ENTRIES = 400
 
+function buildThumbnailAccountPrefix(ownerKey: string) {
+  return `https://quicknote.local/thumbnail/${encodeURIComponent(ownerKey)}/`
+}
+
 function buildThumbnailCacheUrl(
   ownerKey: string,
   noteId: string,
@@ -16,7 +20,7 @@ function buildThumbnailCacheUrl(
     `${attachment.size}:${attachment.createdAt}:${attachment.remoteId ?? ''}`,
   )
 
-  return `https://quicknote.local/thumbnail/${encodeURIComponent(ownerKey)}/${encodeURIComponent(noteId)}/${encodeURIComponent(attachment.id)}?v=${version}`
+  return `${buildThumbnailAccountPrefix(ownerKey)}${encodeURIComponent(noteId)}/${encodeURIComponent(attachment.id)}?v=${version}`
 }
 
 function canvasToBlob(
@@ -102,6 +106,21 @@ async function cacheThumbnail(cacheUrl: string, blob: Blob) {
     }),
   )
   await trimThumbnailCache(cache)
+}
+
+export async function clearNoteAttachmentThumbnails(ownerKey: string) {
+  if (!ownerKey || !('caches' in globalThis)) return 0
+
+  const cache = await caches.open(THUMBNAIL_CACHE_NAME)
+  const prefix = buildThumbnailAccountPrefix(ownerKey)
+  const requests = (await cache.keys()).filter((request) =>
+    request.url.startsWith(prefix),
+  )
+  const results = await Promise.all(
+    requests.map((request) => cache.delete(request)),
+  )
+
+  return results.filter(Boolean).length
 }
 
 export async function getNoteAttachmentThumbnail(
