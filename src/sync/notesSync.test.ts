@@ -14,6 +14,7 @@ const notesApiMocks = vi.hoisted(() => ({
 const notesRepoMocks = vi.hoisted(() => ({
   applyRemoteNoteSnapshot: vi.fn(),
   applyRemoteNotesDelta: vi.fn(),
+  attachRemoteIdToNote: vi.fn(),
   getNoteById: vi.fn(),
   listNotes: vi.fn(),
   markNoteConflict: vi.fn(),
@@ -29,7 +30,9 @@ import {
   getNotesDeltaStateKey,
   isInvalidNotesDeltaError,
   pullNotes,
+  replayNoteOperation,
 } from '@/sync/notesSync'
+import type { LocalNote, PendingOperation } from '@/types/domain'
 
 describe('pullNotes delta state', () => {
   beforeEach(() => {
@@ -73,7 +76,7 @@ describe('pullNotes delta state', () => {
     )
   })
 
-  it('forces a full snapshot when the visible local data belongs to another account', async () => {
+  it('forces a full snapshot when the cursor belongs to another account', async () => {
     const rebuilt = {
       changes: [],
       removedRemoteIds: [],
@@ -82,7 +85,9 @@ describe('pullNotes delta state', () => {
       initial: true,
     }
     appStateMocks.getAppStateValue.mockImplementation((key: string) =>
-      Promise.resolve(key === 'notesSnapshotAccountId' ? 'account-a' : 'saved-account-b-link'),
+      Promise.resolve(
+        key === 'notesSnapshotAccountId' ? 'account-a' : 'saved-account-b-link',
+      ),
     )
     notesApiMocks.fetchRemoteNotesDelta.mockResolvedValue(rebuilt)
 
@@ -94,7 +99,12 @@ describe('pullNotes delta state', () => {
       undefined,
       [],
     )
-    expect(notesRepoMocks.applyRemoteNotesDelta).toHaveBeenCalledWith([], [], [])
+    expect(notesRepoMocks.applyRemoteNotesDelta).toHaveBeenCalledWith(
+      [],
+      [],
+      [],
+      'account-b',
+    )
     expect(appStateMocks.setAppStateValue).toHaveBeenCalledWith(
       'notesSnapshotAccountId',
       'account-b',
@@ -103,12 +113,17 @@ describe('pullNotes delta state', () => {
 
   it('does not apply changes or advance the cursor when hydration fails', async () => {
     appStateMocks.getAppStateValue.mockImplementation((key: string) =>
-      Promise.resolve(key === 'notesSnapshotAccountId' ? 'account-failure' : 'saved-link'),
+      Promise.resolve(
+        key === 'notesSnapshotAccountId' ? 'account-failure' : 'saved-link',
+      ),
     )
-    notesApiMocks.fetchRemoteNotesDelta.mockRejectedValue(new Error('attachment failed'))
+    notesApiMocks.fetchRemoteNotesDelta.mockRejectedValue(
+      new Error('attachment failed'),
+    )
 
-    await expect(pullNotes('token', 'account-failure')).rejects.toThrow('attachment failed')
-
+    await expect(pullNotes('token', 'account-failure')).rejects.toThrow(
+      'attachment failed',
+    )
     expect(notesRepoMocks.applyRemoteNotesDelta).not.toHaveBeenCalled()
     expect(appStateMocks.setAppStateValue).not.toHaveBeenCalled()
     expect(appStateMocks.deleteAppStateValue).not.toHaveBeenCalled()
@@ -123,7 +138,9 @@ describe('pullNotes delta state', () => {
       initial: true,
     }
     appStateMocks.getAppStateValue.mockImplementation((key: string) =>
-      Promise.resolve(key === 'notesSnapshotAccountId' ? 'account-expired' : 'expired-link'),
+      Promise.resolve(
+        key === 'notesSnapshotAccountId' ? 'account-expired' : 'expired-link',
+      ),
     )
     notesApiMocks.fetchRemoteNotesDelta
       .mockRejectedValueOnce(new GraphRequestError('SyncStateNotFound', 410))
@@ -145,6 +162,7 @@ describe('pullNotes delta state', () => {
       rebuilt.changes,
       rebuilt.removedRemoteIds,
       rebuilt.seenRemoteIds,
+      'account-expired',
     )
     expect(appStateMocks.setAppStateValue).toHaveBeenCalledWith(
       'notesDeltaLink:v3:account-expired',
@@ -152,7 +170,7 @@ describe('pullNotes delta state', () => {
     )
   })
 
-  it('recognizes Graph invalid-delta responses without retrying unrelated failures', () => {
+  it('recognizes invalid-delta responses without retrying unrelated failures', () => {
     expect(isInvalidNotesDeltaError(new GraphRequestError('gone', 410))).toBe(true)
     expect(
       isInvalidNotesDeltaError(
@@ -160,5 +178,102 @@ describe('pullNotes delta state', () => {
       ),
     ).toBe(true)
     expect(isInvalidNotesDeltaError(new GraphRequestError('forbidden', 403))).toBe(false)
+  })
+})
+
+describe('replayNoteOperation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('rejects an operation owned by another account before any remote request', async () => {
+    const operation = {
+      id: 'queue-1',
+      ownerKey: 'account-a',
+      entityType: 'note',
+      operation: 'update',
+      localId: 'note-1',
+      payload: {},
+      createdAt: '2026-07-22T00:00:00.000Z',
+      retryCount: 0,
+      targetRevision: 2,
+      status: 'pending',
+    } satisfies PendingOperation
+
+    await expect(
+      replayNoteOperation('token', operation, 'account-b'),
+    ).rejects.toThrow('不属于当前账户')
+    expect(notesRepoMocks.getNoteById).not.toHaveBeenCalled()
+    expect(notesApiMocks.updateRemoteNote).not.toHaveBeenCalled()
+    expect(notesApiMocks.createRemoteNote).not.toHaveBeenCalled()
+  })
+
+  it('persists the remote id before attachment work so a retry resumes', async () => {
+    const note = {
+      id: 'note-1',
+      ownerKey: 'account-a',
+      title: 'Draft',
+      content: '',
+      bodyHtml: '<p>Draft</p>',
+      attachments: [],
+      color: 'yellow',
+      pinned: false,
+      source: 'local',
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T00:00:00.000Z',
+      localRevision: 2,
+      syncedRevision: 0,
+      syncStatus: 'pending',
+    } satisfies LocalNote
+    const operation = {
+      id: 'queue-1',
+      ownerKey: 'account-a',
+      entityType: 'note',
+      operation: 'create',
+      localId: note.id,
+      payload: note as unknown as Record<string, unknown>,
+      createdAt: '2026-07-22T00:00:00.000Z',
+      retryCount: 0,
+      targetRevision: 2,
+      status: 'pending',
+    } satisfies PendingOperation
+    const snapshot = {
+      remoteId: 'remote-1',
+      title: 'Draft',
+      bodyHtml: '<p>Draft</p>',
+      lastSyncedBodyHtml: '<p>Draft</p>',
+      content: 'Draft',
+      attachments: [],
+      color: 'yellow',
+      remoteChangeKey: 'change-1',
+    }
+
+    notesRepoMocks.getNoteById.mockResolvedValue(note)
+    notesApiMocks.createRemoteNote.mockImplementation(
+      async (
+        _token: string,
+        _note: LocalNote,
+        _ownerKey: string,
+        onRemoteCreated: (remoteId: string) => Promise<void>,
+      ) => {
+        await onRemoteCreated('remote-1')
+        return snapshot
+      },
+    )
+
+    await replayNoteOperation('token', operation, 'account-a')
+
+    expect(notesRepoMocks.attachRemoteIdToNote).toHaveBeenCalledWith(
+      note.id,
+      'remote-1',
+      2,
+      'account-a',
+    )
+    expect(notesRepoMocks.applyRemoteNoteSnapshot).toHaveBeenCalledWith(
+      note.id,
+      snapshot,
+      2,
+      'account-a',
+    )
   })
 })

@@ -17,6 +17,8 @@ import {
   isMsalPostRequestFailed,
   markMsalCacheRecoveryAttempted,
 } from '@/auth/msalRecovery'
+import { claimLegacyDataForAccount } from '@/db/accountRepo'
+import { setActiveOwnerKey } from '@/db/accountScope'
 
 interface AuthContextValue {
   account: AccountInfo | null
@@ -77,7 +79,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (nextAccount) {
           msalInstance.setActiveAccount(nextAccount)
+          setActiveOwnerKey(nextAccount.homeAccountId)
+          await claimLegacyDataForAccount(nextAccount.homeAccountId)
           clearMsalCacheRecoveryAttempt(window.sessionStorage)
+        } else {
+          setActiveOwnerKey('')
         }
 
         if (!cancelled) {
@@ -100,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (!cancelled) {
+          setActiveOwnerKey('')
           setError(getMsalAuthErrorMessage(effectiveError))
         }
       } finally {
@@ -118,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async () => {
     setError(null)
+    setActiveOwnerKey('')
     clearMsalCacheRecoveryAttempt(window.sessionStorage)
 
     try {
@@ -129,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     setError(null)
+    setActiveOwnerKey('')
     clearMsalCacheRecoveryAttempt(window.sessionStorage)
 
     try {
@@ -147,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     msalInstance.setActiveAccount(active)
+    setActiveOwnerKey(active.homeAccountId)
 
     try {
       const result = await msalInstance.acquireTokenSilent({
@@ -160,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const interactionRequired = caughtError instanceof InteractionRequiredAuthError
 
       if ((cacheFailure || interactionRequired) && navigator.onLine) {
-        let redirectStarted = false
+        let redirectStarted: boolean
 
         try {
           redirectStarted = await startInteractiveRecovery(cacheFailure)
@@ -172,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (redirectStarted) {
           setError(null)
-          throw new Error('正在重新连接 Microsoft 账户')
+          throw new Error('正在重新连接 Microsoft 账户', { cause: caughtError })
         }
       }
 

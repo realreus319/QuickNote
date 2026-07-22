@@ -3,12 +3,27 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+import { useAuth } from '@/auth/useAuth'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingState } from '@/components/common/LoadingState'
 import { NoteDetailHeader } from '@/components/notes/NoteDetailHeader'
 import { NoteEditor } from '@/components/notes/NoteEditor'
-import { deleteNote, getNoteById, updateNote } from '@/db/notesRepo'
+import { RemoteAttachmentPanel } from '@/components/notes/RemoteAttachmentPanel'
+import {
+  cacheRemoteAttachment,
+  deleteNote,
+  getNoteById,
+  updateNote,
+} from '@/db/notesRepo'
+import {
+  AUTO_DOWNLOAD_NOTE_ATTACHMENT_MAX_BYTES,
+  downloadRemoteNoteAttachment,
+} from '@/graph/notesApi'
 import type { LocalNoteAttachment, NoteColor } from '@/types/domain'
+import {
+  assertSafeImageDimensions,
+  base64ToBlob,
+} from '@/utils/noteAttachments'
 import {
   buildNoteContentSignature,
   buildNoteSnapshotSignature,
@@ -21,6 +36,7 @@ import { runWithViewTransition } from '@/utils/viewTransition'
 function NoteDetailPage() {
   const { noteId } = Route.useParams()
   const navigate = useNavigate()
+  const { getAccessToken } = useAuth()
   const note = useLiveQuery(() => getNoteById(noteId), [noteId])
   const appliedNoteSnapshotRef = useRef<string | null>(null)
   const hydrationSignatureRef = useRef<string | null>(null)
@@ -28,6 +44,7 @@ function NoteDetailPage() {
   const [title, setTitle] = useState('')
   const [bodyHtml, setBodyHtml] = useState('<p></p>')
   const [attachments, setAttachments] = useState<LocalNoteAttachment[]>([])
+  const [loadingAttachmentId, setLoadingAttachmentId] = useState<string>()
 
   useEffect(() => {
     if (!note) return
@@ -55,7 +72,11 @@ function NoteDetailPage() {
       return
     }
 
-    const currentSignature = buildNoteContentSignature(title, bodyHtml, attachments)
+    const currentSignature = buildNoteContentSignature(
+      title,
+      bodyHtml,
+      attachments,
+    )
 
     if (currentSignature !== hydrationSignatureRef.current) {
       return
@@ -67,9 +88,19 @@ function NoteDetailPage() {
   useEffect(() => {
     if (!note) return
 
-    const currentSignature = buildNoteContentSignature(title, bodyHtml, attachments)
+    const currentSignature = buildNoteContentSignature(
+      title,
+      bodyHtml,
+      attachments,
+    )
 
-    if (!shouldAutosaveNote(currentSignature, hydrationSignatureRef.current, isHydratingRef.current)) {
+    if (
+      !shouldAutosaveNote(
+        currentSignature,
+        hydrationSignatureRef.current,
+        isHydratingRef.current,
+      )
+    ) {
       return
     }
 
@@ -101,8 +132,57 @@ function NoteDetailPage() {
 
   async function handleColorChange(color: NoteColor) {
     if (!note || normalizeNoteColor(note.color) === color) return
-
     await updateNote(noteId, { color })
+  }
+
+  async function handleLoadAttachment(attachment: LocalNoteAttachment) {
+    if (!note?.remoteId || loadingAttachmentId) return
+
+    setLoadingAttachmentId(attachment.id)
+
+    try {
+      const accessToken = await getAccessToken()
+      const downloaded = await downloadRemoteNoteAttachment(
+        accessToken,
+        note.remoteId,
+        attachment,
+      )
+
+      if (!downloaded.base64) {
+        throw new Error('远端图片内容为空')
+      }
+
+      await assertSafeImageDimensions(
+        base64ToBlob(downloaded.base64, downloaded.mimeType),
+      )
+
+      if (downloaded.size <= AUTO_DOWNLOAD_NOTE_ATTACHMENT_MAX_BYTES) {
+        await cacheRemoteAttachment(noteId, downloaded)
+        toast('图片已加载')
+        return
+      }
+
+      const memoryOnlyAttachment = {
+        ...downloaded,
+        storageState: 'remote-only' as const,
+      }
+      const nextAttachments = attachments.map((candidate) =>
+        candidate.id === downloaded.id ? memoryOnlyAttachment : candidate,
+      )
+
+      hydrationSignatureRef.current = buildNoteContentSignature(
+        title,
+        bodyHtml,
+        nextAttachments,
+      )
+      isHydratingRef.current = true
+      setAttachments(nextAttachments)
+      toast('图片已加载，本次查看后不会保留原图缓存')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '图片加载失败')
+    } finally {
+      setLoadingAttachmentId(undefined)
+    }
   }
 
   async function handleShare() {
@@ -129,7 +209,9 @@ function NoteDetailPage() {
   }
 
   if (note.deleted) {
-    return <EmptyState title="笔记已删除" description="这条笔记已经移出列表。" />
+    return (
+      <EmptyState title="笔记已删除" description="这条笔记已经移出列表。" />
+    )
   }
 
   return (
@@ -143,11 +225,18 @@ function NoteDetailPage() {
           pinned={note.pinned}
           color={normalizeNoteColor(note.color)}
           syncStatus={note.syncStatus}
-          onBack={() => runWithViewTransition(() => navigate({ to: '/notes' }))}
+          onBack={() =>
+            runWithViewTransition(() => navigate({ to: '/notes' }))
+          }
           onDelete={() => void handleDelete()}
           onShare={() => void handleShare()}
           onColorChange={(color) => void handleColorChange(color)}
           onTogglePin={() => void handleTogglePinned()}
+        />
+        <RemoteAttachmentPanel
+          attachments={attachments}
+          loadingAttachmentId={loadingAttachmentId}
+          onLoadAttachment={(attachment) => void handleLoadAttachment(attachment)}
         />
         <NoteEditor
           title={title}

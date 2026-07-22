@@ -1,3 +1,11 @@
+import { requireActiveOwnerKey } from '@/db/accountScope'
+import {
+  deleteNoteAttachmentBlobs,
+  enforceAttachmentCacheBudget,
+  hydrateNoteAttachmentBlobs,
+  persistNoteAttachmentBlobs,
+  stripAttachmentBytes,
+} from '@/db/attachmentBlobRepo'
 import { db } from '@/db/db'
 import { enqueuePendingOperation } from '@/db/pendingRepo'
 import type { LocalNote, LocalNoteAttachment } from '@/types/domain'
@@ -21,18 +29,94 @@ function sortNotes(notes: LocalNote[]) {
   })
 }
 
-export async function listNotes() {
-  return sortNotes((await db.notes.toArray()).filter((note) => !note.deleted))
+function noteRevision(note: LocalNote) {
+  return Math.max(1, note.localRevision ?? 1)
 }
 
-export async function getNoteById(noteId: string) {
-  return db.notes.get(noteId)
+function syncedNoteRevision(note: LocalNote) {
+  return Math.max(
+    0,
+    note.syncedRevision ??
+      (note.syncStatus === 'synced' ? noteRevision(note) : 0),
+  )
 }
 
-export async function createNote() {
+function hasUnsyncedLocalChanges(note: LocalNote) {
+  return (
+    noteRevision(note) > syncedNoteRevision(note) ||
+    note.syncStatus !== 'synced'
+  )
+}
+
+function mergeAttachmentMetadata(
+  localAttachments: LocalNoteAttachment[],
+  remoteAttachments: LocalNoteAttachment[],
+) {
+  const remoteByContentId = new Map(
+    remoteAttachments.map((attachment) => [attachment.contentId, attachment]),
+  )
+
+  return localAttachments.map((attachment) => {
+    const remote = remoteByContentId.get(attachment.contentId)
+
+    return remote
+      ? {
+          ...attachment,
+          remoteId: remote.remoteId ?? attachment.remoteId,
+          name: remote.name || attachment.name,
+          size: remote.size || attachment.size,
+          storageState:
+            attachment.storageState ?? remote.storageState,
+        }
+      : attachment
+  })
+}
+
+async function persistNoteWithAttachments(
+  note: LocalNote,
+  ownerKey: string,
+) {
+  await persistNoteAttachmentBlobs(note.id, ownerKey, note.attachments)
+  const stored = {
+    ...note,
+    ownerKey,
+    attachments: stripAttachmentBytes(note.attachments),
+  }
+  await db.notes.put(stored)
+  return stored
+}
+
+export async function listNotes(ownerKey = requireActiveOwnerKey()) {
+  return sortNotes(
+    (await db.notes.where('ownerKey').equals(ownerKey).toArray()).filter(
+      (note) => !note.deleted,
+    ),
+  )
+}
+
+export async function getNoteById(
+  noteId: string,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  const note = await db.notes.get(noteId)
+
+  if (!note || note.ownerKey !== ownerKey) return undefined
+
+  return {
+    ...note,
+    attachments: await hydrateNoteAttachmentBlobs(
+      note.id,
+      ownerKey,
+      note.attachments,
+    ),
+  }
+}
+
+export async function createNote(ownerKey = requireActiveOwnerKey()) {
   const now = toIsoNow()
   const note: LocalNote = {
     id: generateLocalId('note'),
+    ownerKey,
     title: '',
     content: '',
     bodyHtml: '<p></p>',
@@ -42,76 +126,124 @@ export async function createNote() {
     source: 'local',
     createdAt: now,
     updatedAt: now,
+    localRevision: 1,
+    syncedRevision: 0,
     syncStatus: 'pending',
   }
 
-  await db.notes.put(note)
-  await enqueuePendingOperation('note', 'create', note.id, note as unknown as Record<string, unknown>)
+  await db.transaction('rw', db.notes, db.pendingOperations, async () => {
+    await db.notes.put(note)
+    await enqueuePendingOperation(
+      'note',
+      'create',
+      note.id,
+      note as unknown as Record<string, unknown>,
+      ownerKey,
+    )
+  })
 
   return note
 }
 
 export async function updateNote(
   noteId: string,
-  patch: Partial<Pick<LocalNote, 'title' | 'bodyHtml' | 'pinned' | 'attachments' | 'color'>>,
+  patch: Partial<
+    Pick<
+      LocalNote,
+      'title' | 'bodyHtml' | 'pinned' | 'attachments' | 'color'
+    >
+  >,
+  ownerKey = requireActiveOwnerKey(),
 ) {
-  const current = await db.notes.get(noteId)
+  return db.transaction(
+    'rw',
+    db.notes,
+    db.noteAttachmentBlobs,
+    db.pendingOperations,
+    async () => {
+      const current = await db.notes.get(noteId)
 
-  if (!current) return
+      if (!current || current.ownerKey !== ownerKey) return undefined
 
-  const nextBodyHtml = patch.bodyHtml ?? current.bodyHtml
-  const nextAttachments = pruneAttachmentsForStoredHtml(
-    patch.attachments ?? current.attachments,
-    nextBodyHtml,
+      const nextBodyHtml = patch.bodyHtml ?? current.bodyHtml
+      const nextAttachments = pruneAttachmentsForStoredHtml(
+        patch.attachments ?? current.attachments,
+        nextBodyHtml,
+      )
+      const localRevision = noteRevision(current) + 1
+      const next: LocalNote = {
+        ...current,
+        ...patch,
+        ownerKey,
+        bodyHtml: nextBodyHtml,
+        attachments: nextAttachments,
+        content: derivePlainTextFromStoredHtml(nextBodyHtml),
+        updatedAt: toIsoNow(),
+        localRevision,
+        syncedRevision: syncedNoteRevision(current),
+        syncStatus: 'pending',
+      }
+      const stored = await persistNoteWithAttachments(next, ownerKey)
+
+      await enqueuePendingOperation(
+        'note',
+        current.remoteId ? 'update' : 'create',
+        noteId,
+        stored,
+        ownerKey,
+      )
+
+      return next
+    },
   )
-
-  const next: LocalNote = {
-    ...current,
-    ...patch,
-    bodyHtml: nextBodyHtml,
-    attachments: nextAttachments,
-    content: derivePlainTextFromStoredHtml(nextBodyHtml),
-    updatedAt: toIsoNow(),
-    syncStatus: 'pending',
-  }
-
-  await db.notes.put(next)
-  await enqueuePendingOperation(
-    'note',
-    current.remoteId ? 'update' : 'create',
-    noteId,
-    next as unknown as Record<string, unknown>,
-  )
-
-  return next
 }
 
-export async function deleteNote(noteId: string) {
-  const current = await db.notes.get(noteId)
+export async function deleteNote(
+  noteId: string,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  await db.transaction('rw', db.notes, db.pendingOperations, async () => {
+    const current = await db.notes.get(noteId)
 
-  if (!current) return
+    if (!current || current.ownerKey !== ownerKey) return
 
-  await db.notes.put({
-    ...current,
-    deleted: true,
-    updatedAt: toIsoNow(),
-    syncStatus: 'pending',
-  })
+    const localRevision = noteRevision(current) + 1
+    const next: LocalNote = {
+      ...current,
+      ownerKey,
+      deleted: true,
+      updatedAt: toIsoNow(),
+      localRevision,
+      syncedRevision: syncedNoteRevision(current),
+      syncStatus: 'pending',
+    }
 
-  await enqueuePendingOperation('note', 'delete', noteId, {
-    id: noteId,
-    remoteId: current.remoteId,
+    await db.notes.put(next)
+    await enqueuePendingOperation(
+      'note',
+      'delete',
+      noteId,
+      {
+        id: noteId,
+        ownerKey,
+        remoteId: current.remoteId,
+        localRevision,
+      },
+      ownerKey,
+    )
   })
 }
 
-export async function searchNotes(query: string) {
+export async function searchNotes(
+  query: string,
+  ownerKey = requireActiveOwnerKey(),
+) {
   const normalized = query.trim().toLowerCase()
 
   if (!normalized) return []
 
-  return (await listNotes()).filter((note) => {
+  return (await listNotes(ownerKey)).filter((note) => {
     const haystack = `${note.title} ${note.content}`.toLowerCase()
-
     return haystack.includes(normalized)
   })
 }
@@ -120,12 +252,11 @@ function mapRemoteNote(
   item: Record<string, unknown>,
   existing: LocalNote | undefined,
   now: string,
+  ownerKey: string,
 ): LocalNote {
   const remoteId = readString(item.id)
 
-  if (!remoteId) {
-    throw new Error('远端便签缺少标识')
-  }
+  if (!remoteId) throw new Error('远端便签缺少标识')
 
   const bodyRecord =
     item.body && typeof item.body === 'object'
@@ -154,9 +285,10 @@ function mapRemoteNote(
       }
     : splitRemoteNoteContent(rawContent)
   const remoteColor = normalizeNoteColor(item.quicknoteColor)
-
-  return {
+  const localRevision = existing ? noteRevision(existing) : 1
+  const mapped: LocalNote = {
     id: existing?.id ?? generateLocalId('note'),
+    ownerKey,
     remoteId,
     title: parsed.title,
     content: parsed.content,
@@ -166,81 +298,169 @@ function mapRemoteNote(
     pinned: existing?.pinned ?? false,
     source: 'microsoft-notes',
     createdAt: readString(item.createdDateTime, existing?.createdAt ?? now),
-    updatedAt: readString(item.lastModifiedDateTime, existing?.updatedAt ?? now),
+    updatedAt: readString(
+      item.lastModifiedDateTime,
+      existing?.updatedAt ?? now,
+    ),
     lastSyncedAt: now,
     lastSyncedTitle: remoteTitle,
     lastSyncedBodyHtml: richHtml ?? '<p></p>',
     lastSyncedColor: remoteColor,
-    remoteChangeKey: readString(item.changeKey, existing?.remoteChangeKey ?? ''),
+    remoteChangeKey: readString(
+      item.changeKey,
+      existing?.remoteChangeKey ?? '',
+    ),
     remoteAttachmentsChangeKey: readString(
       item.quicknoteAttachmentsChangeKey,
       existing?.remoteAttachmentsChangeKey ?? '',
     ),
+    localRevision,
+    syncedRevision: localRevision,
     syncStatus: 'synced',
     deleted: false,
+  }
+
+  if (!existing || !hasUnsyncedLocalChanges(existing)) return mapped
+
+  return {
+    ...mapped,
+    title: existing.title,
+    content: existing.content,
+    bodyHtml: existing.bodyHtml,
+    attachments: existing.attachments,
+    color: existing.color,
+    pinned: existing.pinned,
+    updatedAt: existing.updatedAt,
+    lastSyncedAt: existing.lastSyncedAt,
+    lastSyncedTitle: existing.lastSyncedTitle,
+    lastSyncedBodyHtml: existing.lastSyncedBodyHtml,
+    lastSyncedColor: existing.lastSyncedColor,
+    remoteChangeKey: existing.remoteChangeKey,
+    remoteAttachmentsChangeKey: existing.remoteAttachmentsChangeKey,
+    localRevision: noteRevision(existing),
+    syncedRevision: syncedNoteRevision(existing),
+    syncStatus: existing.syncStatus,
+    deleted: existing.deleted,
   }
 }
 
 export async function applyRemoteNotesDelta(
   changes: Array<Record<string, unknown>>,
   removedRemoteIds: string[],
-  fullSnapshotRemoteIds?: string[],
+  fullSnapshotRemoteIds: string[] | undefined,
+  ownerKey: string,
 ) {
-  await db.transaction('rw', db.notes, async () => {
-    const currentNotes = await db.notes.toArray()
-    const currentByRemoteId = new Map(
-      currentNotes
-        .filter((note) => note.remoteId)
-        .map((note) => [note.remoteId as string, note]),
-    )
-    const now = toIsoNow()
-    const removed = new Set(removedRemoteIds)
-    const mappedByRemoteId = new Map<string, LocalNote>()
+  await db.transaction(
+    'rw',
+    db.notes,
+    db.noteAttachmentBlobs,
+    async () => {
+      const currentNotes = await db.notes
+        .where('ownerKey')
+        .equals(ownerKey)
+        .toArray()
+      const currentByRemoteId = new Map(
+        currentNotes
+          .filter((note) => note.remoteId)
+          .map((note) => [note.remoteId as string, note]),
+      )
+      const now = toIsoNow()
+      const removed = new Set(removedRemoteIds)
+      const mappedByRemoteId = new Map<string, LocalNote>()
 
-    for (const item of changes) {
-      const remoteId = readString(item.id)
+      for (const item of changes) {
+        const remoteId = readString(item.id)
+        if (removed.has(remoteId)) continue
 
-      if (removed.has(remoteId)) {
-        continue
+        const mapped = mapRemoteNote(
+          item,
+          currentByRemoteId.get(remoteId),
+          now,
+          ownerKey,
+        )
+        await persistNoteAttachmentBlobs(
+          mapped.id,
+          ownerKey,
+          mapped.attachments,
+        )
+        mappedByRemoteId.set(remoteId, {
+          ...mapped,
+          attachments: stripAttachmentBytes(mapped.attachments),
+        })
       }
 
-      const mapped = mapRemoteNote(item, currentByRemoteId.get(remoteId), now)
-      mappedByRemoteId.set(remoteId, mapped)
-    }
-
-    const fullSnapshot = fullSnapshotRemoteIds ? new Set(fullSnapshotRemoteIds) : undefined
-    const localIdsToDelete = currentNotes
-      .filter(
+      const fullSnapshot = fullSnapshotRemoteIds
+        ? new Set(fullSnapshotRemoteIds)
+        : undefined
+      const notesToDelete = currentNotes.filter(
         (note) =>
           note.remoteId &&
-          (removed.has(note.remoteId) || (fullSnapshot && !fullSnapshot.has(note.remoteId))),
+          !hasUnsyncedLocalChanges(note) &&
+          (removed.has(note.remoteId) ||
+            (fullSnapshot && !fullSnapshot.has(note.remoteId))),
       )
-      .map((note) => note.id)
 
-    if (localIdsToDelete.length) {
-      await db.notes.bulkDelete(localIdsToDelete)
-    }
+      for (const note of notesToDelete) {
+        await db.notes.delete(note.id)
+        await deleteNoteAttachmentBlobs(note.id, ownerKey)
+      }
 
-    if (mappedByRemoteId.size) {
-      await db.notes.bulkPut([...mappedByRemoteId.values()])
-    }
-  })
+      if (mappedByRemoteId.size) {
+        await db.notes.bulkPut([...mappedByRemoteId.values()])
+      }
+    },
+  )
+
+  await enforceAttachmentCacheBudget(ownerKey)
 }
 
-export async function applySyncedNote(noteId: string, remoteId: string) {
+export async function attachRemoteIdToNote(
+  noteId: string,
+  remoteId: string,
+  expectedRevision: number,
+  ownerKey: string,
+) {
   const note = await db.notes.get(noteId)
 
-  if (!note) return
+  if (
+    !note ||
+    note.ownerKey !== ownerKey ||
+    noteRevision(note) < expectedRevision
+  ) {
+    return
+  }
 
   await db.notes.put({
     ...note,
     remoteId,
     source: 'microsoft-notes',
-    syncStatus: 'synced',
+    syncStatus: 'pending',
+  })
+}
+
+export async function applySyncedNote(
+  noteId: string,
+  remoteId: string,
+  expectedRevision = 1,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  const note = await db.notes.get(noteId)
+
+  if (!note || note.ownerKey !== ownerKey) return
+
+  const currentRevision = noteRevision(note)
+  const fullySynced = currentRevision === expectedRevision
+
+  await db.notes.put({
+    ...note,
+    remoteId,
+    source: 'microsoft-notes',
+    syncStatus: fullySynced ? 'synced' : 'pending',
     lastSyncedAt: toIsoNow(),
     lastSyncedTitle: note.title,
     lastSyncedBodyHtml: note.bodyHtml,
     lastSyncedColor: note.color,
+    syncedRevision: Math.max(syncedNoteRevision(note), expectedRevision),
   })
 }
 
@@ -258,34 +478,115 @@ interface AppliedRemoteNoteSnapshot {
 export async function applyRemoteNoteSnapshot(
   noteId: string,
   snapshot: AppliedRemoteNoteSnapshot,
+  expectedRevision: number,
+  ownerKey: string,
+) {
+  await db.transaction(
+    'rw',
+    db.notes,
+    db.noteAttachmentBlobs,
+    async () => {
+      const note = await db.notes.get(noteId)
+      if (!note || note.ownerKey !== ownerKey) return
+
+      const currentRevision = noteRevision(note)
+      const fullySynced = currentRevision === expectedRevision
+      await persistNoteAttachmentBlobs(
+        noteId,
+        ownerKey,
+        snapshot.attachments,
+      )
+      const remoteAttachmentMetadata = stripAttachmentBytes(
+        snapshot.attachments,
+      )
+      const common = {
+        remoteId: snapshot.remoteId,
+        source: 'microsoft-notes' as const,
+        lastSyncedAt: toIsoNow(),
+        lastSyncedTitle: snapshot.title,
+        lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
+        lastSyncedColor: snapshot.color,
+        remoteChangeKey: snapshot.remoteChangeKey,
+        remoteAttachmentsChangeKey: snapshot.remoteChangeKey,
+        syncedRevision: Math.max(
+          syncedNoteRevision(note),
+          expectedRevision,
+        ),
+      }
+
+      await db.notes.put(
+        fullySynced
+          ? {
+              ...note,
+              ...common,
+              title: snapshot.title,
+              content: snapshot.content,
+              bodyHtml: snapshot.bodyHtml,
+              attachments: remoteAttachmentMetadata,
+              color: snapshot.color,
+              syncStatus: 'synced',
+            }
+          : {
+              ...note,
+              ...common,
+              attachments: mergeAttachmentMetadata(
+                note.attachments,
+                remoteAttachmentMetadata,
+              ),
+              syncStatus: 'pending',
+            },
+      )
+    },
+  )
+
+  await enforceAttachmentCacheBudget(ownerKey)
+}
+
+export async function cacheRemoteAttachment(
+  noteId: string,
+  attachment: LocalNoteAttachment,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  const next = await db.transaction(
+    'rw',
+    db.notes,
+    db.noteAttachmentBlobs,
+    async () => {
+      const note = await db.notes.get(noteId)
+      if (!note || note.ownerKey !== ownerKey) return undefined
+
+      const hydratedAttachments = note.attachments.map((candidate) =>
+        candidate.id === attachment.id ? attachment : candidate,
+      )
+      await persistNoteAttachmentBlobs(
+        noteId,
+        ownerKey,
+        hydratedAttachments,
+      )
+      const stored = {
+        ...note,
+        attachments: stripAttachmentBytes(hydratedAttachments),
+      }
+      await db.notes.put(stored)
+
+      return {
+        ...stored,
+        attachments: hydratedAttachments,
+      }
+    },
+  )
+
+  await enforceAttachmentCacheBudget(ownerKey)
+  return next
+}
+
+export async function markNoteConflict(
+  noteId: string,
+  ownerKey = requireActiveOwnerKey(),
 ) {
   const note = await db.notes.get(noteId)
 
-  if (!note) return
-
-  await db.notes.put({
-    ...note,
-    remoteId: snapshot.remoteId,
-    title: snapshot.title,
-    content: snapshot.content,
-    bodyHtml: snapshot.bodyHtml,
-    attachments: snapshot.attachments,
-    color: snapshot.color,
-    source: 'microsoft-notes',
-    syncStatus: 'synced',
-    lastSyncedAt: toIsoNow(),
-    lastSyncedTitle: snapshot.title,
-    lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
-    lastSyncedColor: snapshot.color,
-    remoteChangeKey: snapshot.remoteChangeKey,
-    remoteAttachmentsChangeKey: snapshot.remoteChangeKey,
-  })
-}
-
-export async function markNoteConflict(noteId: string) {
-  const note = await db.notes.get(noteId)
-
-  if (!note) return
+  if (!note || note.ownerKey !== ownerKey) return
 
   await db.notes.put({
     ...note,
@@ -294,6 +595,21 @@ export async function markNoteConflict(noteId: string) {
   })
 }
 
-export async function removeDeletedNote(noteId: string) {
-  await db.notes.delete(noteId)
+export async function removeDeletedNote(
+  noteId: string,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  await db.transaction(
+    'rw',
+    db.notes,
+    db.noteAttachmentBlobs,
+    async () => {
+      const note = await db.notes.get(noteId)
+
+      if (note?.ownerKey === ownerKey) {
+        await db.notes.delete(noteId)
+        await deleteNoteAttachmentBlobs(noteId, ownerKey)
+      }
+    },
+  )
 }
