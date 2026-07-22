@@ -14,6 +14,7 @@ import {
 import {
   applyRemoteNotesDelta,
   applyRemoteNoteSnapshot,
+  attachRemoteIdToNote,
   getNoteById,
   listNotes,
   markNoteConflict,
@@ -90,13 +91,7 @@ export async function replayNoteOperation(
   if (operation.operation === 'delete') {
     const remoteId = readString(operation.payload.remoteId, note?.remoteId ?? '')
     if (remoteId) {
-      try {
-        await deleteRemoteNote(accessToken, remoteId)
-      } catch (error) {
-        if (!(error instanceof GraphRequestError) || error.status !== 404) {
-          throw error
-        }
-      }
+      await deleteRemoteNote(accessToken, remoteId)
     }
     await removeDeletedNote(operation.localId, ownerKey)
     return
@@ -107,7 +102,19 @@ export async function replayNoteOperation(
   try {
     const snapshot = note.remoteId
       ? await updateRemoteNote(accessToken, note)
-      : await createRemoteNote(accessToken, note, ownerKey)
+      : await createRemoteNote(
+          accessToken,
+          note,
+          ownerKey,
+          async (remoteId) => {
+            await attachRemoteIdToNote(
+              operation.localId,
+              remoteId,
+              expectedRevision,
+              ownerKey,
+            )
+          },
+        )
     await applySnapshot(
       operation.localId,
       snapshot,
