@@ -3,11 +3,19 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+import { useAuth } from '@/auth/useAuth'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingState } from '@/components/common/LoadingState'
 import { NoteDetailHeader } from '@/components/notes/NoteDetailHeader'
 import { NoteEditor } from '@/components/notes/NoteEditor'
-import { deleteNote, getNoteById, updateNote } from '@/db/notesRepo'
+import { RemoteAttachmentPanel } from '@/components/notes/RemoteAttachmentPanel'
+import {
+  cacheRemoteAttachment,
+  deleteNote,
+  getNoteById,
+  updateNote,
+} from '@/db/notesRepo'
+import { downloadRemoteNoteAttachment } from '@/graph/notesApi'
 import type { LocalNoteAttachment, NoteColor } from '@/types/domain'
 import {
   buildNoteContentSignature,
@@ -21,6 +29,7 @@ import { runWithViewTransition } from '@/utils/viewTransition'
 function NoteDetailPage() {
   const { noteId } = Route.useParams()
   const navigate = useNavigate()
+  const { getAccessToken } = useAuth()
   const note = useLiveQuery(() => getNoteById(noteId), [noteId])
   const appliedNoteSnapshotRef = useRef<string | null>(null)
   const hydrationSignatureRef = useRef<string | null>(null)
@@ -28,6 +37,7 @@ function NoteDetailPage() {
   const [title, setTitle] = useState('')
   const [bodyHtml, setBodyHtml] = useState('<p></p>')
   const [attachments, setAttachments] = useState<LocalNoteAttachment[]>([])
+  const [loadingAttachmentId, setLoadingAttachmentId] = useState<string>()
 
   useEffect(() => {
     if (!note) return
@@ -101,8 +111,33 @@ function NoteDetailPage() {
 
   async function handleColorChange(color: NoteColor) {
     if (!note || normalizeNoteColor(note.color) === color) return
-
     await updateNote(noteId, { color })
+  }
+
+  async function handleLoadAttachment(attachment: LocalNoteAttachment) {
+    if (!note?.remoteId || loadingAttachmentId) return
+
+    setLoadingAttachmentId(attachment.id)
+
+    try {
+      const accessToken = await getAccessToken()
+      const downloaded = await downloadRemoteNoteAttachment(
+        accessToken,
+        note.remoteId,
+        attachment,
+      )
+      await cacheRemoteAttachment(noteId, downloaded)
+      setAttachments((current) =>
+        current.map((candidate) =>
+          candidate.id === downloaded.id ? downloaded : candidate,
+        ),
+      )
+      toast('图片已加载')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '图片加载失败')
+    } finally {
+      setLoadingAttachmentId(undefined)
+    }
   }
 
   async function handleShare() {
@@ -148,6 +183,11 @@ function NoteDetailPage() {
           onShare={() => void handleShare()}
           onColorChange={(color) => void handleColorChange(color)}
           onTogglePin={() => void handleTogglePinned()}
+        />
+        <RemoteAttachmentPanel
+          attachments={attachments}
+          loadingAttachmentId={loadingAttachmentId}
+          onLoadAttachment={(attachment) => void handleLoadAttachment(attachment)}
         />
         <NoteEditor
           title={title}
