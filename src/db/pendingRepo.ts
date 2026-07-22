@@ -1,36 +1,112 @@
+import { requireActiveOwnerKey } from '@/db/accountScope'
 import { db } from '@/db/db'
-import type { EntityType, PendingOperationType } from '@/types/domain'
-import { generateLocalId } from '@/utils/id'
+import type {
+  EntityType,
+  PendingOperationStatus,
+  PendingOperationType,
+} from '@/types/domain'
 import { toIsoNow } from '@/utils/date'
+import { generateLocalId } from '@/utils/id'
 
-export async function listPendingOperations() {
-  return db.pendingOperations.orderBy('createdAt').toArray()
+export const PENDING_OPERATION_EVENT = 'quicknote:pending-operation'
+const MAX_RETRY_COUNT = 8
+
+function notifyPendingOperationChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(PENDING_OPERATION_EVENT))
+  }
 }
 
-export async function countPendingOperations() {
-  return db.pendingOperations.count()
+function operationRevision(payload: Record<string, unknown>, fallback = 1) {
+  const value = Number(payload.localRevision)
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
 }
 
-export async function removePendingOperation(id: string) {
-  await db.pendingOperations.delete(id)
+export async function listPendingOperations(ownerKey = requireActiveOwnerKey()) {
+  const now = toIsoNow()
+  const operations = await db.pendingOperations.where('ownerKey').equals(ownerKey).toArray()
+
+  return operations
+    .filter((operation) => {
+      const status = operation.status ?? 'pending'
+
+      if (status === 'conflict' || status === 'dead-letter') {
+        return false
+      }
+
+      return !operation.nextAttemptAt || operation.nextAttemptAt <= now
+    })
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 }
 
-export async function removePendingOperationsForLocalId(localId: string) {
-  const items = await db.pendingOperations.where('localId').equals(localId).toArray()
+export async function countPendingOperations(ownerKey = requireActiveOwnerKey()) {
+  const operations = await db.pendingOperations.where('ownerKey').equals(ownerKey).toArray()
+  return operations.filter((operation) => operation.status !== 'dead-letter').length
+}
+
+export async function completePendingOperation(
+  id: string,
+  targetRevision: number,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  return db.transaction('rw', db.pendingOperations, async () => {
+    const operation = await db.pendingOperations.get(id)
+
+    if (
+      !operation ||
+      operation.ownerKey !== ownerKey ||
+      (operation.targetRevision ?? 1) !== targetRevision
+    ) {
+      return false
+    }
+
+    await db.pendingOperations.delete(id)
+    notifyPendingOperationChanged()
+    return true
+  })
+}
+
+export async function removePendingOperationsForLocalId(
+  localId: string,
+  ownerKey = requireActiveOwnerKey(),
+) {
+  const items = await db.pendingOperations
+    .where('[ownerKey+localId]')
+    .equals([ownerKey, localId])
+    .toArray()
 
   await db.pendingOperations.bulkDelete(items.map((item) => item.id))
+  notifyPendingOperationChanged()
 }
 
-export async function markPendingOperationError(id: string, lastError: string) {
+export async function markPendingOperationError(
+  id: string,
+  lastError: string,
+  options: {
+    status?: PendingOperationStatus
+    retryAfterMs?: number
+  } = {},
+) {
   const operation = await db.pendingOperations.get(id)
 
   if (!operation) return
 
+  const retryCount = operation.retryCount + 1
+  const status =
+    options.status ?? (retryCount >= MAX_RETRY_COUNT ? 'dead-letter' : 'retry-wait')
+  const retryAfterMs =
+    options.retryAfterMs ?? Math.min(15 * 60_000, 2 ** Math.min(retryCount, 8) * 1_000)
+
   await db.pendingOperations.put({
     ...operation,
-    retryCount: operation.retryCount + 1,
+    retryCount,
+    status,
+    lastAttemptAt: toIsoNow(),
+    nextAttemptAt:
+      status === 'retry-wait' ? new Date(Date.now() + retryAfterMs).toISOString() : undefined,
     lastError,
   })
+  notifyPendingOperationChanged()
 }
 
 export async function enqueuePendingOperation(
@@ -38,56 +114,71 @@ export async function enqueuePendingOperation(
   operation: PendingOperationType,
   localId: string,
   payload: Record<string, unknown>,
+  ownerKey = requireActiveOwnerKey(),
 ) {
-  const existing = (await db.pendingOperations.where('localId').equals(localId).toArray())
+  const existing = (
+    await db.pendingOperations
+      .where('[ownerKey+localId]')
+      .equals([ownerKey, localId])
+      .toArray()
+  )
     .filter((item) => item.entityType === entityType)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 
   const first = existing[0]
+  const targetRevision = operationRevision(
+    payload,
+    Math.max(1, first?.targetRevision ?? 1),
+  )
 
   if (operation === 'delete') {
     await db.pendingOperations.bulkDelete(existing.map((item) => item.id))
     await db.pendingOperations.put({
       id: generateLocalId('queue'),
+      ownerKey,
       entityType,
       operation,
       localId,
       payload,
       createdAt: toIsoNow(),
       retryCount: 0,
+      targetRevision,
+      status: 'pending',
     })
+    notifyPendingOperationChanged()
     return
   }
 
-  if (first?.operation === 'create') {
+  if (first?.operation === 'create' || first?.operation === 'update') {
     await db.pendingOperations.put({
       ...first,
+      ownerKey,
       payload: {
         ...first.payload,
         ...payload,
       },
+      targetRevision,
+      retryCount: 0,
+      status: 'pending',
+      nextAttemptAt: undefined,
+      lastAttemptAt: undefined,
+      lastError: undefined,
     })
-    return
-  }
-
-  if (first?.operation === 'update') {
-    await db.pendingOperations.put({
-      ...first,
-      payload: {
-        ...first.payload,
-        ...payload,
-      },
-    })
+    notifyPendingOperationChanged()
     return
   }
 
   await db.pendingOperations.put({
     id: generateLocalId('queue'),
+    ownerKey,
     entityType,
     operation,
     localId,
     payload,
     createdAt: toIsoNow(),
     retryCount: 0,
+    targetRevision,
+    status: 'pending',
   })
+  notifyPendingOperationChanged()
 }
