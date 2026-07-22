@@ -1,5 +1,10 @@
 export type EntityType = 'note' | 'todo'
 export type PendingOperationType = 'create' | 'update' | 'delete'
+export type PendingOperationStatus =
+  | 'pending'
+  | 'retry-wait'
+  | 'conflict'
+  | 'dead-letter'
 export type NoteSource = 'microsoft-notes' | 'local'
 export type NoteColor =
   | 'white'
@@ -18,8 +23,11 @@ export type AppSyncStatus =
   | 'offline'
   | 'error'
 
+export type NoteAttachmentStorageState = 'available' | 'remote-only' | 'error'
+
 export interface LocalNote {
   id: string
+  ownerKey?: string
   remoteId?: string
   title: string
   content: string
@@ -36,6 +44,8 @@ export interface LocalNote {
   lastSyncedColor?: NoteColor
   remoteChangeKey?: string
   remoteAttachmentsChangeKey?: string
+  localRevision?: number
+  syncedRevision?: number
   syncStatus: NoteSyncStatus
   deleted?: boolean
 }
@@ -49,10 +59,13 @@ export interface LocalNoteAttachment {
   base64: string
   contentId: string
   createdAt: string
+  storageState?: NoteAttachmentStorageState
+  lastError?: string
 }
 
 export interface LocalTodoList {
   id: string
+  ownerKey?: string
   remoteId?: string
   displayName: string
   wellknownListName?: string
@@ -60,6 +73,7 @@ export interface LocalTodoList {
 
 export interface LocalTodo {
   id: string
+  ownerKey?: string
   remoteId?: string
   listId: string
   title: string
@@ -69,18 +83,25 @@ export interface LocalTodo {
   dueDateTime?: string
   createdAt?: string
   updatedAt?: string
+  localRevision?: number
+  syncedRevision?: number
   syncStatus: TodoSyncStatus
   deleted?: boolean
 }
 
 export interface PendingOperation {
   id: string
+  ownerKey?: string
   entityType: EntityType
   operation: PendingOperationType
   localId: string
   payload: Record<string, unknown>
   createdAt: string
   retryCount: number
+  targetRevision?: number
+  status?: PendingOperationStatus
+  nextAttemptAt?: string
+  lastAttemptAt?: string
   lastError?: string
 }
 
@@ -98,5 +119,6 @@ export interface SyncResult {
   status: AppSyncStatus
   notesError?: string
   todosError?: string
+  operationErrors?: number
   lastSyncedAt?: string
 }
