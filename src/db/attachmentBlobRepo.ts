@@ -4,13 +4,10 @@ import type {
   LocalNoteAttachment,
   NoteAttachmentBlobRecord,
 } from '@/types/domain'
-import {
-  base64ToBlob,
-  blobToBase64,
-} from '@/utils/noteAttachments'
+import { base64ToBlob, blobToBase64 } from '@/utils/noteAttachments'
 
 export const DEFAULT_ATTACHMENT_CACHE_BUDGET_BYTES = 300 * 1024 * 1024
-const ATTACHMENT_CACHE_TARGET_BYTES = 250 * 1024 * 1024
+const MAX_ATTACHMENT_CACHE_TARGET_BYTES = 250 * 1024 * 1024
 
 export function stripAttachmentBytes(
   attachments: LocalNoteAttachment[],
@@ -26,32 +23,19 @@ export async function persistNoteAttachmentBlobs(
   ownerKey: string,
   attachments: LocalNoteAttachment[],
 ) {
-  const attachmentIds = new Set(attachments.map((attachment) => attachment.id))
-  const existing = await db.noteAttachmentBlobs
-    .where('[ownerKey+noteId]')
-    .equals([ownerKey, noteId])
-    .toArray()
-  const orphanIds = existing
-    .filter((record) => !attachmentIds.has(record.attachmentId))
-    .map((record) => record.id)
-
-  if (orphanIds.length) {
-    await db.noteAttachmentBlobs.bulkDelete(orphanIds)
-  }
-
   const now = new Date().toISOString()
   const records = attachments
-    .filter((attachment) => Boolean(attachment.base64))
+    .filter(
+      (attachment): attachment is LocalNoteAttachment & { base64: string } =>
+        Boolean(attachment.base64),
+    )
     .map(
       (attachment): NoteAttachmentBlobRecord => ({
         id: getAttachmentBlobRecordId(ownerKey, noteId, attachment.id),
         ownerKey,
         noteId,
         attachmentId: attachment.id,
-        blob: base64ToBlob(
-          attachment.base64 as string,
-          attachment.mimeType,
-        ),
+        blob: base64ToBlob(attachment.base64, attachment.mimeType),
         mimeType: attachment.mimeType,
         size: attachment.size,
         createdAt: attachment.createdAt,
@@ -75,9 +59,8 @@ export async function hydrateNoteAttachmentBlobs(
     getAttachmentBlobRecordId(ownerKey, noteId, attachment.id),
   )
   const records = await db.noteAttachmentBlobs.bulkGet(ids)
-  const now = new Date().toISOString()
-  const touched: NoteAttachmentBlobRecord[] = []
-  const hydrated = await Promise.all(
+
+  return Promise.all(
     attachments.map(async (attachment, index) => {
       const record = records[index]
 
@@ -92,11 +75,6 @@ export async function hydrateNoteAttachmentBlobs(
         }
       }
 
-      touched.push({
-        ...record,
-        lastAccessedAt: now,
-      })
-
       return {
         ...attachment,
         base64: await blobToBase64(record.blob),
@@ -104,12 +82,6 @@ export async function hydrateNoteAttachmentBlobs(
       }
     }),
   )
-
-  if (touched.length) {
-    await db.noteAttachmentBlobs.bulkPut(touched)
-  }
-
-  return hydrated
 }
 
 export async function getNoteAttachmentBlob(
@@ -118,16 +90,7 @@ export async function getNoteAttachmentBlob(
   ownerKey: string,
 ) {
   const id = getAttachmentBlobRecordId(ownerKey, noteId, attachmentId)
-  const record = await db.noteAttachmentBlobs.get(id)
-
-  if (!record) return undefined
-
-  await db.noteAttachmentBlobs.put({
-    ...record,
-    lastAccessedAt: new Date().toISOString(),
-  })
-
-  return record.blob
+  return (await db.noteAttachmentBlobs.get(id))?.blob
 }
 
 export async function deleteNoteAttachmentBlobs(
@@ -152,16 +115,36 @@ export async function enforceAttachmentCacheBudget(
     .where('ownerKey')
     .equals(ownerKey)
     .toArray()
-  let totalBytes = records.reduce(
+  const notes = await db.notes.where('ownerKey').equals(ownerKey).toArray()
+  const noteById = new Map(notes.map((note) => [note.id, note]))
+  const orphanRecords = records.filter((record) => {
+    const note = noteById.get(record.noteId)
+    return !note?.attachments.some(
+      (attachment) => attachment.id === record.attachmentId,
+    )
+  })
+
+  if (orphanRecords.length) {
+    await db.noteAttachmentBlobs.bulkDelete(
+      orphanRecords.map((record) => record.id),
+    )
+  }
+
+  const liveRecords = records.filter(
+    (record) => !orphanRecords.some((orphan) => orphan.id === record.id),
+  )
+  let totalBytes = liveRecords.reduce(
     (total, record) => total + record.blob.size,
     0,
   )
 
-  if (totalBytes <= maxBytes) return 0
+  if (totalBytes <= maxBytes) return orphanRecords.length
 
-  const notes = await db.notes.where('ownerKey').equals(ownerKey).toArray()
-  const noteById = new Map(notes.map((note) => [note.id, note]))
-  const candidates = records
+  const targetBytes = Math.min(
+    MAX_ATTACHMENT_CACHE_TARGET_BYTES,
+    Math.floor(maxBytes * 0.85),
+  )
+  const candidates = liveRecords
     .filter((record) => {
       const note = noteById.get(record.noteId)
       const attachment = note?.attachments.find(
@@ -177,7 +160,7 @@ export async function enforceAttachmentCacheBudget(
     .sort((left, right) =>
       left.lastAccessedAt.localeCompare(right.lastAccessedAt),
     )
-  let deletedCount = 0
+  let deletedCount = orphanRecords.length
 
   await db.transaction(
     'rw',
@@ -185,7 +168,7 @@ export async function enforceAttachmentCacheBudget(
     db.notes,
     async () => {
       for (const record of candidates) {
-        if (totalBytes <= ATTACHMENT_CACHE_TARGET_BYTES) break
+        if (totalBytes <= targetBytes) break
 
         await db.noteAttachmentBlobs.delete(record.id)
         const note = await db.notes.get(record.noteId)
