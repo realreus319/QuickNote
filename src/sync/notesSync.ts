@@ -25,17 +25,27 @@ import { readString } from '@/utils/text'
 
 const NOTES_SNAPSHOT_ACCOUNT_KEY = 'notesSnapshotAccountId'
 
-async function applySnapshot(noteId: string, snapshot: RemoteNoteSnapshot) {
-  await applyRemoteNoteSnapshot(noteId, {
-    remoteId: snapshot.remoteId,
-    title: snapshot.title,
-    bodyHtml: snapshot.bodyHtml,
-    lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
-    content: snapshot.content,
-    attachments: snapshot.attachments,
-    color: snapshot.color,
-    remoteChangeKey: snapshot.remoteChangeKey,
-  })
+async function applySnapshot(
+  noteId: string,
+  snapshot: RemoteNoteSnapshot,
+  expectedRevision: number,
+  ownerKey: string,
+) {
+  await applyRemoteNoteSnapshot(
+    noteId,
+    {
+      remoteId: snapshot.remoteId,
+      title: snapshot.title,
+      bodyHtml: snapshot.bodyHtml,
+      lastSyncedBodyHtml: snapshot.lastSyncedBodyHtml,
+      content: snapshot.content,
+      attachments: snapshot.attachments,
+      color: snapshot.color,
+      remoteChangeKey: snapshot.remoteChangeKey,
+    },
+    expectedRevision,
+    ownerKey,
+  )
 }
 
 export function getNotesDeltaStateKey(homeAccountId: string) {
@@ -68,31 +78,45 @@ export async function replayNoteOperation(
   operation: PendingOperation,
   homeAccountId: string,
 ) {
-  const note = await getNoteById(operation.localId)
+  const ownerKey = homeAccountId.trim()
+
+  if (!ownerKey || operation.ownerKey !== ownerKey) {
+    throw new Error('便签同步操作不属于当前账户')
+  }
+
+  const expectedRevision = Math.max(1, operation.targetRevision ?? 1)
+  const note = await getNoteById(operation.localId, ownerKey)
 
   if (operation.operation === 'delete') {
     const remoteId = readString(operation.payload.remoteId, note?.remoteId ?? '')
     if (remoteId) {
-      await deleteRemoteNote(accessToken, remoteId)
+      try {
+        await deleteRemoteNote(accessToken, remoteId)
+      } catch (error) {
+        if (!(error instanceof GraphRequestError) || error.status !== 404) {
+          throw error
+        }
+      }
     }
-    await removeDeletedNote(operation.localId)
+    await removeDeletedNote(operation.localId, ownerKey)
     return
   }
 
   if (!note) return
 
-  if (!note.remoteId || operation.operation === 'create') {
-    const snapshot = await createRemoteNote(accessToken, note, homeAccountId)
-    await applySnapshot(operation.localId, snapshot)
-    return
-  }
-
   try {
-    const snapshot = await updateRemoteNote(accessToken, note)
-    await applySnapshot(operation.localId, snapshot)
+    const snapshot = note.remoteId
+      ? await updateRemoteNote(accessToken, note)
+      : await createRemoteNote(accessToken, note, ownerKey)
+    await applySnapshot(
+      operation.localId,
+      snapshot,
+      expectedRevision,
+      ownerKey,
+    )
   } catch (caughtError) {
     if (caughtError instanceof RichTextMergeError) {
-      await markNoteConflict(operation.localId)
+      await markNoteConflict(operation.localId, ownerKey)
     }
 
     throw caughtError
@@ -102,7 +126,7 @@ export async function replayNoteOperation(
 export async function pullNotes(accessToken: string, homeAccountId: string) {
   const accountId = homeAccountId.trim()
   const deltaStateKey = getNotesDeltaStateKey(accountId)
-  const cachedNotes = await listNotes()
+  const cachedNotes = await listNotes(accountId)
   const savedDeltaLink = await getAppStateValue(deltaStateKey, '')
   const snapshotAccountId = await getAppStateValue(NOTES_SNAPSHOT_ACCOUNT_KEY, '')
   const activeDeltaLink = snapshotAccountId === accountId ? savedDeltaLink : ''
@@ -133,9 +157,10 @@ export async function pullNotes(accessToken: string, homeAccountId: string) {
     deltaResult.changes,
     deltaResult.removedRemoteIds,
     deltaResult.initial ? deltaResult.seenRemoteIds : undefined,
+    accountId,
   )
   await setAppStateValue(NOTES_SNAPSHOT_ACCOUNT_KEY, accountId)
   await setAppStateValue(deltaStateKey, deltaResult.deltaLink)
 
-  return listNotes()
+  return listNotes(accountId)
 }
