@@ -13,7 +13,12 @@ const syncStatusMap = {
 } as const
 
 export function NoteCard({ note }: { note: LocalNote }) {
-  const previewImage = note.attachments?.find((attachment) => attachment.mimeType.startsWith('image/'))
+  const previewImage = note.attachments?.find(
+    (attachment) =>
+      attachment.mimeType.startsWith('image/') &&
+      attachment.storageState !== 'remote-only' &&
+      Boolean(attachment.base64),
+  )
   const syncStatus = note.syncStatus === 'synced' ? null : syncStatusMap[note.syncStatus]
   const SyncIcon = syncStatus?.icon
 
@@ -32,6 +37,7 @@ export function NoteCard({ note }: { note: LocalNote }) {
             src={`data:${previewImage.mimeType};base64,${previewImage.base64}`}
             alt=""
             loading="lazy"
+            decoding="async"
             className="order-first mb-3 aspect-[4/3] w-full max-w-full rounded-[11px] border border-[color:var(--note-line)] bg-[color:var(--note-paper-raised)] object-cover"
           />
         ) : null}
