@@ -1,6 +1,7 @@
 import { getAttachmentBlobRecordId } from '@/db/attachmentKeys'
 import { db } from '@/db/db'
 import type {
+  LocalNote,
   LocalNoteAttachment,
   NoteAttachmentBlobRecord,
 } from '@/types/domain'
@@ -94,6 +95,20 @@ export async function getNoteAttachmentBlob(
   return (await db.noteAttachmentBlobs.get(id))?.blob
 }
 
+export async function getAttachmentCacheUsage(ownerKey: string) {
+  if (!ownerKey) return { bytes: 0, count: 0 }
+
+  const records = await db.noteAttachmentBlobs
+    .where('ownerKey')
+    .equals(ownerKey)
+    .toArray()
+
+  return {
+    bytes: records.reduce((total, record) => total + record.blob.size, 0),
+    count: records.length,
+  }
+}
+
 export async function deleteNoteAttachmentBlobs(
   noteId: string,
   ownerKey: string,
@@ -106,6 +121,86 @@ export async function deleteNoteAttachmentBlobs(
   if (records.length) {
     await db.noteAttachmentBlobs.bulkDelete(records.map((record) => record.id))
   }
+}
+
+function canEvictRemoteCacheRecord(
+  record: NoteAttachmentBlobRecord,
+  note: LocalNote | undefined,
+) {
+  const attachment = note?.attachments.find(
+    (item) => item.id === record.attachmentId,
+  )
+
+  return Boolean(
+    note?.syncStatus === 'synced' &&
+      attachment?.remoteId &&
+      !note.deleted,
+  )
+}
+
+async function removeCachedRecords(
+  ownerKey: string,
+  records: NoteAttachmentBlobRecord[],
+) {
+  if (!records.length) return { count: 0, bytes: 0 }
+
+  const attachmentIdsByNote = new Map<string, Set<string>>()
+
+  for (const record of records) {
+    const ids = attachmentIdsByNote.get(record.noteId) ?? new Set<string>()
+    ids.add(record.attachmentId)
+    attachmentIdsByNote.set(record.noteId, ids)
+  }
+
+  await db.transaction(
+    'rw',
+    db.noteAttachmentBlobs,
+    db.notes,
+    async () => {
+      await db.noteAttachmentBlobs.bulkDelete(
+        records.map((record) => record.id),
+      )
+
+      for (const [noteId, attachmentIds] of attachmentIdsByNote) {
+        const note = await db.notes.get(noteId)
+
+        if (!note || note.ownerKey !== ownerKey) continue
+
+        await db.notes.put({
+          ...note,
+          attachments: note.attachments.map((attachment) =>
+            attachmentIds.has(attachment.id)
+              ? {
+                  ...attachment,
+                  base64: undefined,
+                  storageState: 'remote-only' as const,
+                }
+              : attachment,
+          ),
+        })
+      }
+    },
+  )
+
+  return {
+    count: records.length,
+    bytes: records.reduce((total, record) => total + record.blob.size, 0),
+  }
+}
+
+export async function clearRemoteAttachmentCache(ownerKey: string) {
+  if (!ownerKey) return { count: 0, bytes: 0 }
+
+  const [records, notes] = await Promise.all([
+    db.noteAttachmentBlobs.where('ownerKey').equals(ownerKey).toArray(),
+    db.notes.where('ownerKey').equals(ownerKey).toArray(),
+  ])
+  const noteById = new Map(notes.map((note) => [note.id, note]))
+  const removable = records.filter((record) =>
+    canEvictRemoteCacheRecord(record, noteById.get(record.noteId)),
+  )
+
+  return removeCachedRecords(ownerKey, removable)
 }
 
 export async function enforceAttachmentCacheBudget(
@@ -145,54 +240,20 @@ export async function enforceAttachmentCacheBudget(
     Math.floor(maxBytes * 0.85),
   )
   const candidates = liveRecords
-    .filter((record) => {
-      const note = noteById.get(record.noteId)
-      const attachment = note?.attachments.find(
-        (item) => item.id === record.attachmentId,
-      )
-
-      return Boolean(
-        note?.syncStatus === 'synced' &&
-          attachment?.remoteId &&
-          !note.deleted,
-      )
-    })
+    .filter((record) =>
+      canEvictRemoteCacheRecord(record, noteById.get(record.noteId)),
+    )
     .sort((left, right) =>
       left.lastAccessedAt.localeCompare(right.lastAccessedAt),
     )
-  let deletedCount = orphanRecords.length
+  const toRemove: NoteAttachmentBlobRecord[] = []
 
-  await db.transaction(
-    'rw',
-    db.noteAttachmentBlobs,
-    db.notes,
-    async () => {
-      for (const record of candidates) {
-        if (totalBytes <= targetBytes) break
+  for (const record of candidates) {
+    if (totalBytes <= targetBytes) break
+    toRemove.push(record)
+    totalBytes -= record.blob.size
+  }
 
-        await db.noteAttachmentBlobs.delete(record.id)
-        const note = await db.notes.get(record.noteId)
-
-        if (note?.ownerKey === ownerKey) {
-          await db.notes.put({
-            ...note,
-            attachments: note.attachments.map((attachment) =>
-              attachment.id === record.attachmentId
-                ? {
-                    ...attachment,
-                    base64: undefined,
-                    storageState: 'remote-only' as const,
-                  }
-                : attachment,
-            ),
-          })
-        }
-
-        totalBytes -= record.blob.size
-        deletedCount += 1
-      }
-    },
-  )
-
-  return deletedCount
+  await removeCachedRecords(ownerKey, toRemove)
+  return orphanRecords.length + toRemove.length
 }
