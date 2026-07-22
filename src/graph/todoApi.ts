@@ -1,22 +1,26 @@
-import { graphFetch } from '@/graph/graphClient'
+import {
+  fetchAllGraphPages,
+  graphFetch,
+  GraphRequestError,
+} from '@/graph/graphClient'
 import type { LocalTodo } from '@/types/domain'
 
-export async function fetchRemoteTodoLists(accessToken: string) {
-  const response = await graphFetch<{ value?: Array<Record<string, unknown>> }>(
-    accessToken,
-    '/v1.0/me/todo/lists',
-  )
+function encodePathSegment(value: string) {
+  return encodeURIComponent(value)
+}
 
-  return response.value ?? []
+export async function fetchRemoteTodoLists(accessToken: string) {
+  return fetchAllGraphPages<Record<string, unknown>>(
+    accessToken,
+    '/v1.0/me/todo/lists?$top=100',
+  )
 }
 
 export async function fetchRemoteTodos(accessToken: string, listRemoteId: string) {
-  const response = await graphFetch<{ value?: Array<Record<string, unknown>> }>(
+  return fetchAllGraphPages<Record<string, unknown>>(
     accessToken,
-    `/v1.0/me/todo/lists/${listRemoteId}/tasks`,
+    `/v1.0/me/todo/lists/${encodePathSegment(listRemoteId)}/tasks?$top=100`,
   )
-
-  return response.value ?? []
 }
 
 export async function createRemoteTodo(
@@ -26,9 +30,10 @@ export async function createRemoteTodo(
 ) {
   return graphFetch<Record<string, unknown>>(
     accessToken,
-    `/v1.0/me/todo/lists/${listRemoteId}/tasks`,
+    `/v1.0/me/todo/lists/${encodePathSegment(listRemoteId)}/tasks`,
     {
       method: 'POST',
+      maxRetries: 0,
       body: JSON.stringify({
         title: todo.title,
         status: todo.status,
@@ -55,7 +60,7 @@ export async function updateRemoteTodo(
 
   return graphFetch<Record<string, unknown>>(
     accessToken,
-    `/v1.0/me/todo/lists/${listRemoteId}/tasks/${todo.remoteId}`,
+    `/v1.0/me/todo/lists/${encodePathSegment(listRemoteId)}/tasks/${encodePathSegment(todo.remoteId)}`,
     {
       method: 'PATCH',
       body: JSON.stringify({
@@ -78,11 +83,19 @@ export async function deleteRemoteTodo(
   listRemoteId: string,
   remoteId: string,
 ) {
-  return graphFetch<void>(
-    accessToken,
-    `/v1.0/me/todo/lists/${listRemoteId}/tasks/${remoteId}`,
-    {
-      method: 'DELETE',
-    },
-  )
+  try {
+    await graphFetch<void>(
+      accessToken,
+      `/v1.0/me/todo/lists/${encodePathSegment(listRemoteId)}/tasks/${encodePathSegment(remoteId)}`,
+      {
+        method: 'DELETE',
+      },
+    )
+  } catch (error) {
+    if (error instanceof GraphRequestError && error.status === 404) {
+      return
+    }
+
+    throw error
+  }
 }
