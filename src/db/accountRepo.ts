@@ -1,4 +1,5 @@
 import { LEGACY_OWNER_KEY, normalizeOwnerKey } from '@/db/accountScope'
+import { getAttachmentBlobRecordId } from '@/db/attachmentKeys'
 import { db } from '@/db/db'
 
 export async function claimLegacyDataForAccount(ownerKeyValue: string) {
@@ -11,6 +12,7 @@ export async function claimLegacyDataForAccount(ownerKeyValue: string) {
   await db.transaction(
     'rw',
     db.notes,
+    db.noteAttachmentBlobs,
     db.todoLists,
     db.todos,
     db.pendingOperations,
@@ -22,6 +24,28 @@ export async function claimLegacyDataForAccount(ownerKeyValue: string) {
 
       if (hasOwnedData) {
         return
+      }
+
+      const legacyBlobs = await db.noteAttachmentBlobs
+        .where('ownerKey')
+        .equals(LEGACY_OWNER_KEY)
+        .toArray()
+
+      if (legacyBlobs.length) {
+        await db.noteAttachmentBlobs.bulkPut(
+          legacyBlobs.map((record) => ({
+            ...record,
+            id: getAttachmentBlobRecordId(
+              ownerKey,
+              record.noteId,
+              record.attachmentId,
+            ),
+            ownerKey,
+          })),
+        )
+        await db.noteAttachmentBlobs.bulkDelete(
+          legacyBlobs.map((record) => record.id),
+        )
       }
 
       await db.notes
