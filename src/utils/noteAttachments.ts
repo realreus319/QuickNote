@@ -38,6 +38,7 @@ export const SUPPORTED_NOTE_IMAGE_TYPES = [
 
 export const DIRECT_NOTE_ATTACHMENT_MAX_BYTES = 3 * 1024 * 1024
 export const MAX_NOTE_ATTACHMENT_BYTES = 35 * 1024 * 1024
+export const MAX_DECODED_NOTE_IMAGE_PIXELS = 40_000_000
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char] ?? char)
@@ -97,7 +98,29 @@ export function formatAttachmentSize(size: number) {
   return `${Math.max(1, Math.round(size / 1024))} KB`
 }
 
-export function buildRemoteNoteBodyHtml(content: string, attachments: LocalNoteAttachment[]) {
+export async function assertSafeImageDimensions(blob: Blob) {
+  if (typeof createImageBitmap !== 'function') {
+    return
+  }
+
+  let bitmap: ImageBitmap | undefined
+
+  try {
+    bitmap = await createImageBitmap(blob)
+    const pixels = bitmap.width * bitmap.height
+
+    if (pixels > MAX_DECODED_NOTE_IMAGE_PIXELS) {
+      throw new Error('图片分辨率过高，无法安全加载')
+    }
+  } finally {
+    bitmap?.close()
+  }
+}
+
+export function buildRemoteNoteBodyHtml(
+  content: string,
+  attachments: LocalNoteAttachment[],
+) {
   const escapedContent = escapeHtml(content.replace(/\r\n/g, '\n').trim())
   const htmlText = escapedContent ? escapedContent.replace(/\n/g, '<br />') : '&nbsp;'
   const imageMarkup = attachments
@@ -119,13 +142,10 @@ export function extractLocalNoteContentFromHtml(bodyHtml: string) {
     .split('\n')
     .map((line) => line.replace(/[ \t]+/g, ' ').trim())
     .filter((line, index, lines) => {
-      if (line) {
-        return true
-      }
+      if (line) return true
 
       const previous = lines[index - 1]
       const next = lines[index + 1]
-
       return Boolean(previous && next)
     })
     .join('\n')
@@ -138,7 +158,9 @@ export function sortAttachmentsByBodyOrder(
   bodyHtml: string | undefined,
 ) {
   if (!bodyHtml) {
-    return attachments.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+    return attachments.toSorted((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    )
   }
 
   const order = new Map<string, number>()
@@ -214,6 +236,8 @@ export async function blobToBase64(blob: Blob) {
 export async function fileToLocalNoteAttachment(file: File) {
   const mimeType = file.type.toLowerCase()
 
+  await assertSafeImageDimensions(file)
+
   return {
     id: generateLocalId('attachment'),
     name: file.name || 'image',
@@ -222,5 +246,6 @@ export async function fileToLocalNoteAttachment(file: File) {
     base64: await blobToBase64(file),
     contentId: `quicknote-${generateLocalId('image')}`,
     createdAt: toIsoNow(),
+    storageState: 'available',
   } satisfies LocalNoteAttachment
 }
