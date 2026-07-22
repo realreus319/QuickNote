@@ -59,7 +59,11 @@ function classifyOperationError(error: unknown): {
   }
 
   if (error instanceof GraphRequestError) {
-    if ([400, 401, 403].includes(error.status)) {
+    if (error.status === 401) {
+      return { status: 'retry-wait', retryAfterMs: 60_000 }
+    }
+
+    if ([400, 403].includes(error.status)) {
       return { status: 'dead-letter' }
     }
 
@@ -112,6 +116,7 @@ async function runSync(
   const pendingOperations = await listPendingOperations(ownerKey)
   let operationErrors = 0
   let firstOperationError = ''
+  let authorizationError = false
 
   for (const operation of pendingOperations) {
     const expectedRevision = Math.max(1, operation.targetRevision ?? 1)
@@ -137,6 +142,22 @@ async function runSync(
       await markPendingOperationError(operation.id, message, classification)
       operationErrors += 1
       firstOperationError ||= message
+
+      if (caughtError instanceof GraphRequestError && caughtError.status === 401) {
+        authorizationError = true
+        break
+      }
+    }
+  }
+
+  if (authorizationError) {
+    const message = 'Microsoft 授权已失效，重新授权后会继续同步'
+    await setSyncStatus(ownerKey, ownerGeneration, 'error', {
+      lastSyncError: message,
+    })
+    return {
+      status: 'error',
+      operationErrors,
     }
   }
 
