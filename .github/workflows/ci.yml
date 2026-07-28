@@ -40,7 +40,7 @@ jobs:
 
       - name: Upload lint diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lint-diagnostics
           path: lint.log
@@ -51,7 +51,7 @@ jobs:
 
       - name: Upload typecheck diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: typecheck-diagnostics
           path: typecheck.log
@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload test diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-diagnostics
           path: test.log
@@ -73,7 +73,7 @@ jobs:
 
       - name: Upload build diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-diagnostics
           path: build.log
