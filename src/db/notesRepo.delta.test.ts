@@ -6,8 +6,23 @@ const dbMocks = vi.hoisted(() => {
   const records = new Map<string, object>()
   const notes = {
     toArray: vi.fn(() => Promise.resolve([...records.values()])),
+    where: vi.fn((field: string) => ({
+      equals: vi.fn((value: unknown) => ({
+        toArray: vi.fn(() =>
+          Promise.resolve(
+            [...records.values()].filter(
+              (record) => (record as Record<string, unknown>)[field] === value,
+            ),
+          ),
+        ),
+      })),
+    })),
     bulkDelete: vi.fn((ids: string[]) => {
       for (const id of ids) records.delete(id)
+      return Promise.resolve()
+    }),
+    delete: vi.fn((id: string) => {
+      records.delete(id)
       return Promise.resolve()
     }),
     bulkPut: vi.fn((items: Array<{ id: string }>) => {
@@ -15,9 +30,10 @@ const dbMocks = vi.hoisted(() => {
       return Promise.resolve()
     }),
   }
-  const transaction = vi.fn(
-    (_mode: string, _table: unknown, callback: () => Promise<void>) => callback(),
-  )
+  const transaction = vi.fn((...args: unknown[]) => {
+    const callback = args.at(-1) as () => Promise<void>
+    return callback()
+  })
 
   return { notes, records, transaction }
 })
@@ -25,6 +41,13 @@ const dbMocks = vi.hoisted(() => {
 vi.mock('@/db/db', () => ({
   db: {
     notes: dbMocks.notes,
+    noteAttachmentBlobs: {
+      where: vi.fn(() => ({
+        equals: vi.fn(() => ({ toArray: vi.fn(() => Promise.resolve([])) })),
+      })),
+      bulkDelete: vi.fn(() => Promise.resolve()),
+      bulkPut: vi.fn(() => Promise.resolve()),
+    },
     transaction: dbMocks.transaction,
   },
 }))
@@ -38,6 +61,7 @@ import type { LocalNote } from '@/types/domain'
 function makeLocalNote(id: string, remoteId?: string): LocalNote {
   return {
     id,
+    ownerKey: 'test-owner',
     remoteId,
     title: id,
     content: '',
@@ -84,6 +108,8 @@ describe('applyRemoteNotesDelta', () => {
         makeRemoteChange('remote-new', 'New title'),
       ],
       ['remote-deleted'],
+      undefined,
+      'test-owner',
     )
 
     const notes = [...dbMocks.records.values()] as unknown as LocalNote[]
@@ -108,6 +134,7 @@ describe('applyRemoteNotesDelta', () => {
       [makeRemoteChange('remote-current', 'Current')],
       [],
       ['remote-current'],
+      'test-owner',
     )
 
     const notes = [...dbMocks.records.values()] as unknown as LocalNote[]

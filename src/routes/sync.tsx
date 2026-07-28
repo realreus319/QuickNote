@@ -1,14 +1,27 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Check, ChevronDown, CloudOff, RefreshCw, TriangleAlert } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  CloudOff,
+  RefreshCw,
+  RotateCcw,
+  TriangleAlert,
+} from 'lucide-react'
+import { toast } from 'sonner'
 
 import { TopBar } from '@/components/app/TopBar'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Button } from '@/components/ui/button'
+import { resolveNoteConflictKeepLocal } from '@/db/conflictRepo'
 import { db } from '@/db/db'
-import { listPendingOperations } from '@/db/pendingRepo'
+import {
+  listAllPendingOperations,
+  retryPendingOperation,
+} from '@/db/pendingRepo'
 import { useSyncMutation } from '@/query/syncMutations'
 import { useNetworkStatus } from '@/sync/network'
+import type { PendingOperation } from '@/types/domain'
 import { readString } from '@/utils/text'
 
 const statusPresentation = {
@@ -33,7 +46,7 @@ const statusPresentation = {
   error: {
     icon: TriangleAlert,
     title: '部分内容同步失败',
-    description: '本地内容仍然安全，可以稍后重新尝试。',
+    description: '本地内容仍然安全，可以在下方查看并恢复。',
     className: 'bg-[rgba(201,79,69,0.08)] text-[color:var(--color-danger)]',
   },
   unauthenticated: {
@@ -44,10 +57,36 @@ const statusPresentation = {
   },
 } as const
 
+function operationStatusText(item: PendingOperation) {
+  switch (item.status) {
+    case 'conflict':
+      return '本地和云端同时修改，需要选择恢复方式'
+    case 'dead-letter':
+      return '多次重试仍然失败，已暂停自动重试'
+    case 'retry-wait':
+      return item.nextAttemptAt
+        ? `等待重试：${new Date(item.nextAttemptAt).toLocaleString()}`
+        : '等待自动重试'
+    default:
+      return item.operation === 'create'
+        ? '等待创建到云端'
+        : item.operation === 'update'
+          ? '等待更新云端内容'
+          : '等待从云端删除'
+  }
+}
+
+function operationBadge(item: PendingOperation) {
+  if (item.status === 'conflict') return '内容冲突'
+  if (item.status === 'dead-letter') return '已暂停'
+  if (item.status === 'retry-wait') return '等待重试'
+  return `已重试 ${item.retryCount} 次`
+}
+
 function SyncPage() {
   const mutation = useSyncMutation()
   const networkStatus = useNetworkStatus()
-  const pending = useLiveQuery(() => listPendingOperations(), [])
+  const pending = useLiveQuery(() => listAllPendingOperations(), [])
   const status = useLiveQuery(() => db.appState.get('syncStatus'), [])
   const lastNotesError = useLiveQuery(() => db.appState.get('lastNotesError'), [])
   const lastTodosError = useLiveQuery(() => db.appState.get('lastTodosError'), [])
@@ -55,11 +94,30 @@ function SyncPage() {
   const storedStatus = readString(status?.value, 'unauthenticated')
   const resolvedStatus = networkStatus === 'offline' ? 'offline' : storedStatus
   const presentation =
-    statusPresentation[resolvedStatus as keyof typeof statusPresentation] ?? statusPresentation.unauthenticated
+    statusPresentation[resolvedStatus as keyof typeof statusPresentation] ??
+    statusPresentation.unauthenticated
   const StatusIcon = presentation.icon
   const errorMessages = [lastNotesError?.value, lastTodosError?.value]
     .map((value) => readString(value))
     .filter(Boolean)
+
+  async function handleRecover(item: PendingOperation) {
+    try {
+      if (item.status === 'conflict' && item.entityType === 'note') {
+        await resolveNoteConflictKeepLocal(item.localId)
+        toast('已选择保留本地版本，将重新同步到云端')
+      } else {
+        await retryPendingOperation(item.id)
+        toast('已恢复同步操作')
+      }
+
+      if (networkStatus === 'online') {
+        await mutation.mutateAsync()
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '恢复同步失败')
+    }
+  }
 
   return (
     <section className="space-y-6">
@@ -87,7 +145,7 @@ function SyncPage() {
             <h2 className="text-base font-semibold text-text-primary">{presentation.title}</h2>
             <p className="mt-1 text-sm leading-6 text-text-secondary">{presentation.description}</p>
             {pending?.length ? (
-              <p className="mt-3 text-xs font-medium text-[#80600c]">{pending.length} 项正在等待处理</p>
+              <p className="mt-3 text-xs font-medium text-[#80600c]">{pending.length} 项需要处理</p>
             ) : null}
           </div>
         </div>
@@ -104,31 +162,42 @@ function SyncPage() {
       {pending?.length ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-text-primary">等待同步</h2>
+            <h2 className="text-sm font-semibold text-text-primary">同步队列</h2>
             <span className="text-xs text-text-muted">{pending.length}</span>
           </div>
-          <div className="overflow-hidden rounded-[16px] border border-divider bg-white divide-y divide-divider">
+          <div className="divide-y divide-divider overflow-hidden rounded-[16px] border border-divider bg-white">
             {pending.map((item) => (
               <div key={item.id} className="px-4 py-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-text-primary">
                       {item.entityType === 'note' ? '笔记' : '待办'}待同步
                     </p>
-                    <p className="mt-1 text-xs text-text-secondary">
-                      {item.operation === 'create'
-                        ? '等待创建到云端'
-                        : item.operation === 'update'
-                          ? '等待更新云端内容'
-                          : '等待从云端删除'}
+                    <p className="mt-1 text-xs leading-5 text-text-secondary">
+                      {operationStatusText(item)}
                     </p>
                   </div>
-                  <span className="rounded-full bg-surface-muted px-2 py-1 text-[11px] text-text-muted">
-                    已重试 {item.retryCount} 次
+                  <span className="shrink-0 rounded-full bg-surface-muted px-2 py-1 text-[11px] text-text-muted">
+                    {operationBadge(item)}
                   </span>
                 </div>
 
-                <details className="mt-3 group">
+                {(item.status === 'conflict' || item.status === 'dead-letter') ? (
+                  <div className="mt-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={mutation.isPending || networkStatus === 'offline'}
+                      onClick={() => void handleRecover(item)}
+                    >
+                      <RotateCcw className="size-4" />
+                      {item.status === 'conflict' ? '保留本地并重新同步' : '重新启用同步'}
+                    </Button>
+                  </div>
+                ) : null}
+
+                <details className="group mt-3">
                   <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs text-text-muted">
                     <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
                     诊断信息
@@ -136,6 +205,7 @@ function SyncPage() {
                   <div className="mt-2 rounded-[10px] bg-surface-muted px-3 py-2 font-mono text-[11px] leading-5 break-all text-text-secondary">
                     <p>本地 ID：{item.localId}</p>
                     <p>操作：{item.operation}</p>
+                    <p>状态：{item.status ?? 'pending'}</p>
                     {item.lastError ? <p className="text-[color:var(--color-danger)]">错误：{item.lastError}</p> : null}
                   </div>
                 </details>

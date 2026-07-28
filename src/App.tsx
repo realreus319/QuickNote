@@ -3,6 +3,7 @@ import { RouterProvider } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
 import { AuthProvider } from '@/auth/AuthProvider'
+import { useAuth } from '@/auth/useAuth'
 import { setAppStateValue } from '@/db/appStateRepo'
 import { ensureDefaultTodoList } from '@/db/todoRepo'
 import { queryClient } from '@/query/queryClient'
@@ -11,10 +12,15 @@ import { useNetworkStatus } from '@/sync/network'
 
 function Bootstrapper() {
   const networkStatus = useNetworkStatus()
+  const { account, initializing } = useAuth()
 
   useEffect(() => {
-    void ensureDefaultTodoList()
-  }, [])
+    const ownerKey = account?.homeAccountId
+
+    if (initializing || !ownerKey) return
+
+    void ensureDefaultTodoList(ownerKey)
+  }, [account?.homeAccountId, initializing])
 
   useEffect(() => {
     void setAppStateValue('networkStatus', networkStatus)

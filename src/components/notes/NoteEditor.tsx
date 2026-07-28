@@ -75,19 +75,23 @@ function sameAttachments(left: LocalNoteAttachment[], right: LocalNoteAttachment
 }
 
 function buildImageInsertContent(attachments: LocalNoteAttachment[]) {
-  return attachments.flatMap((attachment) => [
-    {
-      type: 'quickNoteImage',
-      attrs: {
-        src: base64ToDataUrl(attachment.base64, attachment.mimeType),
-        alt: attachment.name,
-        attachmentId: attachment.id,
+  return attachments.flatMap((attachment) => {
+    if (!attachment.base64) return []
+
+    return [
+      {
+        type: 'quickNoteImage',
+        attrs: {
+          src: base64ToDataUrl(attachment.base64, attachment.mimeType),
+          alt: attachment.name,
+          attachmentId: attachment.id,
+        },
       },
-    },
-    {
-      type: 'paragraph',
-    },
-  ])
+      {
+        type: 'paragraph',
+      },
+    ]
+  })
 }
 
 function syncEditorDomState(editor: TiptapEditor) {
@@ -292,6 +296,11 @@ export function NoteEditor({
 
     if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
       toast('当前浏览器不支持复制图片到剪贴板')
+      return
+    }
+
+    if (!firstAttachment.base64) {
+      toast('图片尚未下载，暂时无法复制')
       return
     }
 

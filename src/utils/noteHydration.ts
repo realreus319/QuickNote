@@ -2,14 +2,22 @@ import type { LocalNote, LocalNoteAttachment } from '@/types/domain'
 
 function buildAttachmentSignature(attachments: LocalNoteAttachment[]) {
   return attachments
-    .map((attachment) => `${attachment.id}:${attachment.contentId}:${attachment.base64.length}`)
+    .map(
+      (attachment) =>
+        `${attachment.id}:${attachment.contentId}:${attachment.storageState ?? ''}:${attachment.base64?.length ?? 0}`,
+    )
     .join('|')
 }
 
-export function buildNoteSnapshotSignature(note: Pick<LocalNote, 'id' | 'title' | 'bodyHtml' | 'attachments'>) {
-  return [note.id, note.title, note.bodyHtml, buildAttachmentSignature(note.attachments ?? [])].join(
-    '\u0000',
-  )
+export function buildNoteSnapshotSignature(
+  note: Pick<LocalNote, 'id' | 'title' | 'bodyHtml' | 'attachments'>,
+) {
+  return [
+    note.id,
+    note.title,
+    note.bodyHtml,
+    buildAttachmentSignature(note.attachments ?? []),
+  ].join('\u0000')
 }
 
 export function buildNoteContentSignature(
