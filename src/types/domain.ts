@@ -30,7 +30,9 @@ export interface LocalNote {
   ownerKey?: string
   remoteId?: string
   title: string
+  /** Plain-text projection derived from bodyHtml for search, preview and merge checks. */
   content: string
+  /** Canonical local HTML. Tiptap hydrates from it and images use quicknote-asset:// IDs. */
   bodyHtml: string
   attachments: LocalNoteAttachment[]
   color: NoteColor
@@ -39,12 +41,17 @@ export interface LocalNote {
   createdAt: string
   updatedAt: string
   lastSyncedAt?: string
+  /** Last server-confirmed title used as the common base for three-way merge. */
   lastSyncedTitle?: string
+  /** Last server-confirmed canonical HTML used as the common merge ancestor. */
   lastSyncedBodyHtml?: string
   lastSyncedColor?: NoteColor
+  /** Graph changeKey observed for the last hydrated server snapshot. */
   remoteChangeKey?: string
   remoteAttachmentsChangeKey?: string
+  /** Monotonic local edit version captured by each Outbox operation. */
   localRevision?: number
+  /** Highest local revision confirmed by Graph and safely applied locally. */
   syncedRevision?: number
   syncStatus: NoteSyncStatus
   deleted?: boolean

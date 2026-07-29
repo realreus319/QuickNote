@@ -1,10 +1,10 @@
 import {
-  createRemoteNote,
   deleteRemoteNote,
   fetchRemoteNotesDelta,
   type RemoteNoteSnapshot,
   updateRemoteNote,
 } from '@/graph/notesApi'
+import { createRemoteNoteWithTemplate } from '@/graph/noteTemplateApi'
 import { GraphRequestError } from '@/graph/graphClient'
 import {
   deleteAppStateValue,
@@ -102,7 +102,7 @@ export async function replayNoteOperation(
   try {
     const snapshot = note.remoteId
       ? await updateRemoteNote(accessToken, note)
-      : await createRemoteNote(
+      : await createRemoteNoteWithTemplate(
           accessToken,
           note,
           ownerKey,

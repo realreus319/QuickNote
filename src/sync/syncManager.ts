@@ -113,10 +113,31 @@ async function runSync(
     }
   }
 
+  // Floaty-compatible ordering: consume the latest Delta first, then replay
+  // local Outbox operations. QuickNote keeps its stronger three-way merge and
+  // revision checks, so remote-first sync does not overwrite newer local edits.
+  let notesError: string | undefined
+  let todosError: string | undefined
+
+  try {
+    await pullNotes(accessToken, ownerKey)
+  } catch (error) {
+    notesError =
+      error instanceof Error ? error.message : '便签同步失败，可稍后重试'
+  }
+
+  try {
+    await pullTodos(accessToken, ownerKey)
+  } catch (error) {
+    todosError =
+      error instanceof Error ? error.message : '待办同步失败，可稍后重试'
+  }
+
   const pendingOperations = await listPendingOperations(ownerKey)
   let operationErrors = 0
   let firstOperationError = ''
   let authorizationError = false
+  let completedNoteOperation = false
 
   for (const operation of pendingOperations) {
     const expectedRevision = Math.max(1, operation.targetRevision ?? 1)
@@ -124,6 +145,7 @@ async function runSync(
     try {
       if (operation.entityType === 'note') {
         await replayNoteOperation(accessToken, operation, ownerKey)
+        completedNoteOperation = true
       } else {
         await replayTodoOperation(accessToken, operation, ownerKey)
       }
@@ -161,21 +183,16 @@ async function runSync(
     }
   }
 
-  let notesError: string | undefined
-  let todosError: string | undefined
-
-  try {
-    await pullNotes(accessToken, ownerKey)
-  } catch (error) {
-    notesError =
-      error instanceof Error ? error.message : '便签同步失败，可稍后重试'
-  }
-
-  try {
-    await pullTodos(accessToken, ownerKey)
-  } catch (error) {
-    todosError =
-      error instanceof Error ? error.message : '待办同步失败，可稍后重试'
+  // A final Delta pull turns Graph's server echo into the authoritative synced
+  // snapshot, mirroring Floaty's confirmation model while retaining immediate
+  // local snapshot application for responsive UI.
+  if (completedNoteOperation && !notesError) {
+    try {
+      await pullNotes(accessToken, ownerKey)
+    } catch (error) {
+      notesError =
+        error instanceof Error ? error.message : '便签同步确认失败，可稍后重试'
+    }
   }
 
   await setAppStateValue(
