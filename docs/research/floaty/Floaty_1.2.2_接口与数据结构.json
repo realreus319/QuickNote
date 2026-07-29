@@ -1,0 +1,195 @@
+{
+  "artifact": {
+    "packageName": "com.editoy.memo.floaty",
+    "versionName": "1.2.2",
+    "versionCode": 122,
+    "sha256": "34b4a54f9d8c2d5a0d2b6d790e0e6522ad0f027208c6193a6ff19405b432d352",
+    "minSdk": 21,
+    "targetSdk": 32,
+    "analysisType": "static"
+  },
+  "signing": {
+    "subject": "CN=Android, OU=Android, O=Google Inc., L=Mountain View, ST=California, C=US",
+    "sha1": "A4:CA:2C:51:96:43:19:D1:76:38:63:6F:EA:E4:9C:CA:04:7E:E4:92",
+    "sha256": "A5:DD:D1:3C:D0:1E:9B:F9:18:58:C3:DD:3F:34:F1:EE:42:32:2A:0F:E1:FC:65:AC:57:E7:E7:09:45:DB:70:66",
+    "algorithm": "SHA256withRSA",
+    "keySize": 4096
+  },
+  "msal": {
+    "clientId": "dc720dc5-91b3-4901-bb02-5e550ea4093f",
+    "redirectUri": "msauth://com.editoy.memo.floaty/callback",
+    "accountMode": "SINGLE",
+    "audience": "AzureADandPersonalMicrosoftAccount",
+    "scopes": [
+      "User.Read",
+      "Mail.ReadWrite"
+    ]
+  },
+  "graph": {
+    "defaultBaseUrl": "https://graph.microsoft.com/v1.0",
+    "profilePhotoBaseUrl": "https://graph.microsoft.com/beta",
+    "endpoints": [
+      {
+        "purpose": "userProfile",
+        "method": "GET",
+        "path": "/me",
+        "fields": ["displayName", "mail", "userPrincipalName"]
+      },
+      {
+        "purpose": "profilePhoto",
+        "method": "GET",
+        "path": "/me/photo/$value",
+        "apiVersion": "beta"
+      },
+      {
+        "purpose": "initialDeltaSync",
+        "method": "GET",
+        "path": "/me/mailFolders/Notes/messages/delta"
+      },
+      {
+        "purpose": "incrementalDeltaSync",
+        "method": "GET",
+        "path": "<saved @odata.deltaLink>"
+      },
+      {
+        "purpose": "attachments",
+        "method": "GET",
+        "path": "/me/mailFolders/Notes/messages/{messageId}/attachments"
+      },
+      {
+        "purpose": "updateNote",
+        "method": "PATCH",
+        "path": "/me/mailFolders/Notes/messages/{messageId}"
+      },
+      {
+        "purpose": "deleteNote",
+        "method": "DELETE",
+        "path": "/me/mailFolders/Notes/messages/{messageId}"
+      },
+      {
+        "purpose": "createByClone",
+        "method": "POST",
+        "path": "/me/mailFolders/Notes/messages/{templateMessageId}/copy",
+        "body": {"destinationId": "Notes"}
+      }
+    ],
+    "updatePayload": {
+      "body": {
+        "contentType": "html",
+        "content": "<local HTML>"
+      },
+      "subject": "first 80 chars of plain text",
+      "bodyPreview": "first 254 chars of plain text"
+    },
+    "downloadedMessageFields": [
+      "id",
+      "subject",
+      "bodyPreview",
+      "body.content",
+      "lastModifiedDateTime",
+      "hasAttachments",
+      "@removed"
+    ],
+    "attachmentFields": ["name", "contentBytes"],
+    "notUsed": [
+      "If-Match",
+      "ETag conflict control",
+      "changeKey conflict control",
+      "Prefer: IdType=ImmutableId",
+      "Graph subscriptions/webhooks",
+      "/beta/me/notes"
+    ]
+  },
+  "localDatabase": {
+    "engine": "SQLiteOpenHelper",
+    "databaseName": "data",
+    "version": 11,
+    "createSql": "CREATE TABLE notes (_id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL, added INT, uid TEXT, extra TEXT, owner TEXT, puretext TEXT, attachment TEXT)",
+    "columns": {
+      "_id": "local primary key",
+      "body": "HTML body",
+      "added": "local modified timestamp; NULL means recycle bin",
+      "uid": "Microsoft Graph Message ID",
+      "extra": "legacy/unused field",
+      "owner": "Microsoft account email; empty/null also acts as dirty marker",
+      "puretext": "plain-text projection",
+      "attachment": "space-separated private image filenames"
+    },
+    "dirtyPredicate": "added IS NOT NULL AND (uid IS NULL OR uid='' OR owner IS NULL OR owner='')",
+    "activePredicate": "added IS NOT NULL",
+    "recyclePredicate": "added IS NULL",
+    "templateQuery": "select uid from notes where owner='<msemail>' and uid is not null and (attachment is null or attachment='') order by _id desc limit 1"
+  },
+  "preferences": {
+    "msusername": "Microsoft display name",
+    "msemail": "Microsoft mail or userPrincipalName",
+    "deltalink": "full Graph delta URL",
+    "spareid": "template/spare note state",
+    "profilepicture": "private profile image file"
+  },
+  "sync": {
+    "download": "Graph delta -> paginate -> local merge",
+    "upload": "query dirty rows -> PATCH existing or copy template then PATCH",
+    "acknowledgement": "next Graph delta echo marks note as owned/synced",
+    "autosaveDebounceMs": 5000,
+    "parallelSyncGuard": true,
+    "createRequiresExistingRemoteTemplate": true,
+    "fallbackUrl": "https://www.onenote.com/stickynotes"
+  },
+  "conflictResolution": {
+    "remoteDelete": "clear added, uid, owner and move local row to recycle bin",
+    "remoteNewerOrEqual": "remote overwrites local",
+    "localNewer": "diff-match-patch remote plain text against local plain text; discard DELETE operations; apply remaining patch to remote; mark dirty for re-upload",
+    "limitations": [
+      "not a CRDT",
+      "deleted text can reappear",
+      "parallel edits can duplicate text",
+      "rich formatting can be lost",
+      "no ETag/If-Match race protection"
+    ]
+  },
+  "attachments": {
+    "downloadOnly": true,
+    "storageDirectory": "images/",
+    "databaseEncoding": "space-separated filenames",
+    "limitations": [
+      "no local attachment upload path found",
+      "filenames containing spaces are unsafe",
+      "non-image attachment handling is weak",
+      "attachment pagination not clearly handled"
+    ]
+  },
+  "permissions": [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.WAKE_LOCK",
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.SYSTEM_ALERT_WINDOW",
+    "com.android.vending.BILLING",
+    "com.google.android.gms.permission.AD_ID"
+  ],
+  "thirdParty": {
+    "microsoft": ["MSAL Android", "Microsoft Graph Java SDK", "Graph Java Core 1.0.5"],
+    "android": ["RxJava", "SQLiteOpenHelper", "StandOut-style floating window"],
+    "google": ["Google Mobile Ads", "Google Play Billing 4.1.0"],
+    "other": ["diff-match-patch", "OpenCSV"],
+    "adMobAppId": "ca-app-pub-8663027256237159~6360163445"
+  },
+  "securityObservations": {
+    "customSyncBackendFound": false,
+    "certificatePinningFound": false,
+    "localDatabaseEncrypted": false,
+    "accessTokenManuallyStoredInPlainPreferences": false,
+    "broadMailboxPermission": true,
+    "adSdkPresent": true,
+    "allowBackupExplicitlyDisabled": false
+  },
+  "notableDefects": [
+    "delete marks local row recycled before Graph DELETE succeeds, making automatic retry impossible after failure",
+    "database upgrade migrates only _id, body, uid, owner and can lose other fields",
+    "no optimistic concurrency control",
+    "attachment filename serialization is fragile",
+    "rich-text conflict merge degrades to plain text"
+  ]
+}
