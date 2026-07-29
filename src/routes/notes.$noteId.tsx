@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/auth/useAuth'
@@ -33,6 +33,14 @@ import { derivePlainTextFromStoredHtml } from '@/utils/noteRichHtml'
 import { normalizeNoteColor } from '@/utils/noteColor'
 import { runWithViewTransition } from '@/utils/viewTransition'
 
+const NOTE_AUTOSAVE_DELAY_MS = 5_000
+
+interface NoteDraftSnapshot {
+  title: string
+  bodyHtml: string
+  attachments: LocalNoteAttachment[]
+}
+
 function NoteDetailPage() {
   const { noteId } = Route.useParams()
   const navigate = useNavigate()
@@ -40,11 +48,25 @@ function NoteDetailPage() {
   const note = useLiveQuery(() => getNoteById(noteId), [noteId])
   const appliedNoteSnapshotRef = useRef<string | null>(null)
   const hydrationSignatureRef = useRef<string | null>(null)
+  const lastSavedSignatureRef = useRef<string | null>(null)
   const isHydratingRef = useRef(true)
+  const latestDraftRef = useRef<NoteDraftSnapshot>({
+    title: '',
+    bodyHtml: '<p></p>',
+    attachments: [],
+  })
   const [title, setTitle] = useState('')
   const [bodyHtml, setBodyHtml] = useState('<p></p>')
   const [attachments, setAttachments] = useState<LocalNoteAttachment[]>([])
   const [loadingAttachmentId, setLoadingAttachmentId] = useState<string>()
+
+  useEffect(() => {
+    latestDraftRef.current = {
+      title,
+      bodyHtml,
+      attachments,
+    }
+  }, [attachments, bodyHtml, title])
 
   useEffect(() => {
     if (!note) return
@@ -56,11 +78,13 @@ function NoteDetailPage() {
     }
 
     appliedNoteSnapshotRef.current = nextSnapshot
-    hydrationSignatureRef.current = buildNoteContentSignature(
+    const contentSignature = buildNoteContentSignature(
       note.title,
       note.bodyHtml,
       note.attachments ?? [],
     )
+    hydrationSignatureRef.current = contentSignature
+    lastSavedSignatureRef.current = contentSignature
     isHydratingRef.current = true
     setTitle(note.title)
     setBodyHtml(note.bodyHtml)
@@ -85,6 +109,37 @@ function NoteDetailPage() {
     isHydratingRef.current = false
   }, [attachments, bodyHtml, note, title])
 
+  const persistLatestDraft = useCallback(async () => {
+    if (!note || isHydratingRef.current) return
+
+    const draft = latestDraftRef.current
+    const signature = buildNoteContentSignature(
+      draft.title,
+      draft.bodyHtml,
+      draft.attachments,
+    )
+
+    if (
+      !shouldAutosaveNote(
+        signature,
+        lastSavedSignatureRef.current,
+        isHydratingRef.current,
+      )
+    ) {
+      return
+    }
+
+    const previousSignature = lastSavedSignatureRef.current
+    lastSavedSignatureRef.current = signature
+
+    try {
+      await updateNote(noteId, draft)
+    } catch (error) {
+      lastSavedSignatureRef.current = previousSignature
+      throw error
+    }
+  }, [note, noteId])
+
   useEffect(() => {
     if (!note) return
 
@@ -97,7 +152,7 @@ function NoteDetailPage() {
     if (
       !shouldAutosaveNote(
         currentSignature,
-        hydrationSignatureRef.current,
+        lastSavedSignatureRef.current,
         isHydratingRef.current,
       )
     ) {
@@ -105,17 +160,49 @@ function NoteDetailPage() {
     }
 
     const timer = window.setTimeout(() => {
-      void updateNote(noteId, {
-        title,
-        bodyHtml,
-        attachments,
+      void persistLatestDraft().catch(() => {
+        toast('本地保存失败，请稍后重试')
       })
-    }, 250)
+    }, NOTE_AUTOSAVE_DELAY_MS)
 
     return () => {
       window.clearTimeout(timer)
     }
-  }, [attachments, bodyHtml, note, noteId, title])
+  }, [attachments, bodyHtml, note, persistLatestDraft, title])
+
+  useEffect(() => {
+    function flushDraft() {
+      void persistLatestDraft().catch(() => {
+        // 页面离开时不弹出阻塞式提示；同步页仍会显示失败状态。
+      })
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        flushDraft()
+      }
+    }
+
+    window.addEventListener('pagehide', flushDraft)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('pagehide', flushDraft)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      flushDraft()
+    }
+  }, [persistLatestDraft])
+
+  async function handleBack() {
+    try {
+      await persistLatestDraft()
+    } catch {
+      toast('本地保存失败，请稍后重试')
+      return
+    }
+
+    runWithViewTransition(() => navigate({ to: '/notes' }))
+  }
 
   async function handleDelete() {
     await deleteNote(noteId)
@@ -169,12 +256,14 @@ function NoteDetailPage() {
       const nextAttachments = attachments.map((candidate) =>
         candidate.id === downloaded.id ? memoryOnlyAttachment : candidate,
       )
-
-      hydrationSignatureRef.current = buildNoteContentSignature(
+      const memoryOnlySignature = buildNoteContentSignature(
         title,
         bodyHtml,
         nextAttachments,
       )
+
+      hydrationSignatureRef.current = memoryOnlySignature
+      lastSavedSignatureRef.current = memoryOnlySignature
       isHydratingRef.current = true
       setAttachments(nextAttachments)
       toast('图片已加载，本次查看后不会保留原图缓存')
@@ -225,9 +314,7 @@ function NoteDetailPage() {
           pinned={note.pinned}
           color={normalizeNoteColor(note.color)}
           syncStatus={note.syncStatus}
-          onBack={() =>
-            runWithViewTransition(() => navigate({ to: '/notes' }))
-          }
+          onBack={() => void handleBack()}
           onDelete={() => void handleDelete()}
           onShare={() => void handleShare()}
           onColorChange={(color) => void handleColorChange(color)}
